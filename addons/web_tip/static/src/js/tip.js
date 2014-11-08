@@ -78,6 +78,10 @@
                 groups_def.done(function() {
                     self.eval_tip(action_id, model, fields_view.type);
                 });
+            } else if (fields_view.type === 'tree') {
+                view.on('view_list_rendered', self, function() {
+                    self.eval_tip(action_id, model, fields_view.type);
+                });
             }
         },
 
@@ -86,7 +90,16 @@
             var model = formView.model;
             var type = formView.datarecord.type ? formView.datarecord.type : null;
             var mode = 'form';
-            self.eval_tip(null, model, mode, type);
+            formView.on('view_content_has_changed', self, function() {
+                self.eval_tip(null, model, mode, type);
+            });
+            if ($('.oe_chatter').length > 0) {
+                instance.web.bus.on('chatter_messages_fetched', this, function() {
+                    self.eval_tip(null, model, mode, type);
+                });
+            } else {
+                self.eval_tip(null, model, mode, type);
+            }
         },
 
         // stub
@@ -132,7 +145,9 @@
         add_tip: function(tip) {
             var self = this;
             self.tip_mutex.exec(function() {
-                return $.when(self.do_tip(tip));
+                if (!tip.is_consumed) {
+                    return $.when(self.do_tip(tip));
+                }
             });
         },
 
@@ -155,16 +170,28 @@
 
             if (trigger_tip) {
                 self.$element = $(highlight_selector).first();
-                var _top = self.$element.offset().top -5;
-                var _left = self.$element.offset().left -5;
-                var _width = self.$element.outerWidth() + 10;
-                var _height = self.$element.outerHeight() + 10;
+                if (self.$element.height() === 0 || self.$element.width() === 0) {
+                    var $images = self.$element.find('img');
+                    if ($images.length > 0) {
+                        $images.first().load(function() {
+                            self.add_tip(tip);
+                        });
+                    }
+                    return def.reject();
+                }
+
+                // if needed, scroll prior to displaying the tip
+                var scroll = _.find(self.$element.parentsUntil('body'), function(el) {
+                    var overflow = $(el).css('overflow-y');
+                    return (overflow === 'auto' || overflow === 'scroll');
+                });
+                if (scroll) {
+                    $(scroll).scrollTo(self.$element);
+                }
 
                 self.$helper = $("<div>", { class: 'oe_tip_helper' });
                 self.$element.after(self.$helper);
-                self.$helper.offset({top: _top , left: _left});
-                self.$helper.width(_width);
-                self.$helper.height(_height);
+                self._set_helper_position();
 
                 self.$overlay = $("<div>", { class: 'oe_tip_overlay' });
                 $('body').append(self.$overlay);
@@ -219,6 +246,11 @@
                         def.resolve();
                     }
                 });
+
+                // resize
+                instance.web.bus.on('resize', this, function() {
+                    self.reposition();
+                });
             } else {
                def.reject();
             }
@@ -238,6 +270,24 @@
             $(document).off('keyup.web_tip');
             Tips.call('consume', [tip.id], {});
             tip.is_consumed = true;
+        },
+
+        reposition: function() {
+            var self = this;
+            if (self.tip_mutex.def.state() === 'pending') {
+                self._set_helper_position();
+            }
+        },
+
+        _set_helper_position : function() {
+            var offset = this.$element.offset();
+            var _top = offset.top - 5;
+            var _left = offset.left - 5;
+            var _width = this.$element.outerWidth() + 10;
+            var _height = this.$element.outerHeight() + 10;
+            this.$helper.offset({top: _top , left: _left});
+            this.$helper.width(_width);
+            this.$helper.height(_height);
         }
     });
 
@@ -245,6 +295,13 @@
         show_application: function() {
             this._super();
             this.tip_handler = new instance.web.Tip();
+        }
+    });
+
+    instance.web.form.FieldStatus = instance.web.form.FieldStatus.extend({
+        render_value: function() {
+            this._super();
+            instance.webclient.tip_handler.reposition();
         }
     });
 })();
