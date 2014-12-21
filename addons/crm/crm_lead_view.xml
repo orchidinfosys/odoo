@@ -216,6 +216,18 @@
         </field>
         </record>
 
+        <!-- CRM Lead Pivot View -->
+        <record model="ir.ui.view" id="crm_case_pivot_view_leads">
+            <field name="name">Opportunities</field>
+            <field name="model">crm.lead</field>
+            <field name="arch" type="xml">
+                <pivot string="Opportunities" display_quantity="true">
+                    <field name="stage_id" type="row"/>
+                    <field name="planned_revenue" type="measure"/>
+                </pivot>
+            </field>
+        </record>
+
         <!-- CRM Lead Graph View -->
         <record model="ir.ui.view" id="crm_case_graph_view_leads">
             <field name="name">Opportunities</field>
@@ -275,7 +287,7 @@
             <field name="model">crm.lead</field>
             <field name="arch" type="xml">
                 <kanban default_group_by="stage_id">
-                    <field name="stage_id"/>
+                    <field name="stage_id" options='{"group_by_tooltip": {"requirements": "Description", "legend_priority": "Use of stars"}}'/>
                     <field name="color"/>
                     <field name="priority"/>
                     <field name="planned_revenue" sum="Expected Revenues"/>
@@ -284,14 +296,15 @@
                     <field name="partner_address_email"/>
                     <field name="message_summary"/>
                     <field name="message_unread"/>
+                    <field name="tag_ids"/>
                     <templates>
                         <field name="date_deadline"/>
                         <t t-name="kanban-box">
                             <div t-attf-class="oe_kanban_color_#{kanban_getcolor(record.color.raw_value)} oe_kanban_card oe_kanban_global_click">
                                 <div class="oe_dropdown_toggle oe_dropdown_kanban">
-                                    <span class="oe_e">í</span>
+                                    <span class="oe_e">i</span>
                                     <ul class="oe_dropdown_menu">
-                                        <t t-if="widget.view.is_action_enabled('edit')"><li><a type="edit">Edit...</a></li></t>
+                                        <t t-if="widget.view.is_action_enabled('edit')"><li><a type="edit">Edit Opportunity</a></li></t>
                                         <t t-if="widget.view.is_action_enabled('delete')"><li><a type="delete">Delete</a></li></t>
                                         <li><a name="%(mail.action_email_compose_message_wizard)d" type="action" >Send Email</a></li>
                                         <li><a type="action" name="%(crm.crm_phonecall_category_phone_incoming0)d">Calls</a></li>
@@ -301,7 +314,7 @@
                                 </div>
                                 <div class="oe_kanban_content">
                                     <div>
-                                        <b><field name="name"/></b>
+                                        <strong><field name="name"/></strong>
                                         <t t-if="record.planned_revenue.raw_value">
                                             - <b><t t-esc="record.planned_revenue.value"/>
                                             <field name="company_currency"/></b>
@@ -310,20 +323,21 @@
                                     <div>
                                         <field name="partner_id"/>
                                     </div>
-                                    <div style="padding-left: 0.5em">
+                                    <div class="oe_deadline">
                                         <t t-if="record.date_deadline.raw_value and record.date_deadline.raw_value lt (new Date())" t-set="red">oe_kanban_text_red</t>
                                         <span t-attf-class="#{red || ''}"><field name="date_action"/></span>
                                         <t t-if="record.date_action.raw_value"> : </t>
                                         <field name="title_action"/>
+                                    </div>
+                                    <div class="oe_kanban_footer_left">
+                                        <t t-raw="record.message_summary.raw_value"/>
+                                        <field name="tag_ids"/>
                                     </div>
                                     <div class="oe_kanban_bottom_right">
                                         <img t-att-src="kanban_image('res.users', 'image_small', record.user_id.raw_value)" t-att-title="record.user_id.value" width="24" height="24" class="oe_kanban_avatar pull-right"/>
                                         <div class="pull-left" groups="base.group_user">
                                             <field name="priority" widget="priority"/>
                                         </div>
-                                    </div>
-                                    <div class="oe_kanban_footer_left">
-                                        <t t-raw="record.message_summary.raw_value"/>
                                     </div>
                                 </div>
                                 <div class="oe_clear"></div>
@@ -344,7 +358,7 @@
                     <field name="tag_ids" string="Tag" filter_domain="[('tag_ids', 'ilike', self)]"/>
                     <field name="team_id" groups="base.group_multi_salesteams"/>
                     <field name="user_id"/>
-                    <field name="partner_id" operator="child_of"/>
+                    <field name="partner_id" operator="child_of" string="Customer"/>
                     <field name="create_date"/>
                     <field name="country_id"/>
                     <separator/>
@@ -354,6 +368,9 @@
                     <filter string="Unassigned" name="unassigned"
                             domain="[('user_id','=', False)]"
                             help="No salesperson"/>
+                    <filter string="To Process" name="to_process"
+                            domain="['|',('stage_id.probability','>', 0),('stage_id.fold','=', False)]"
+                            help="Not marked as Dead"/>   
                     <separator />
                     <filter string="New Mail" name="message_unread" domain="[('message_unread','=',True)]"/>
                     <separator />
@@ -450,6 +467,7 @@
                             </group>
                             <group>
                                 <field name="tag_ids" widget="many2many_tags"/>
+                                <field name="lost_reason"/>
                             </group>
                         </group>
 
@@ -555,16 +573,17 @@
                     <field name="tag_ids" string="Tag" filter_domain="[('tag_ids', 'ilike', self)]"/>
                     <field name="team_id" groups="base.group_multi_salesteams"/>
                     <field name="user_id"/>
-                    <field name="partner_id" operator="child_of"/>
+                    <field name="partner_id" operator="child_of" string="Customer"/>
                     <field name="stage_id" domain="[]"/>
                     <field name="probability"/>
+                    <field name="lost_reason"/>
                     <separator/>
                     <filter string="New" name="new"
-                            domain="[('probability', '=', 0), ('stage_id.sequence', '&lt;=', 1)]"/>
+                            domain="['&amp;', ('stage_id.probability', '=', 0), ('stage_id.sequence', '&lt;=', 1)]"/>
                     <filter string="Won" name="won"
-                            domain="[('probability', '=', 100), ('stage_id.fold', '=', True)]"/>
+                            domain="['&amp;', ('stage_id.probability', '=', 100), ('stage_id.fold', '=', True)]"/>
                     <filter string="Lost" name="lost"
-                            domain="[('probability', '=', 0), ('stage_id.fold', '=', True)]"/>
+                            domain="['&amp;', ('stage_id.probability', '=', 0), ('stage_id.fold', '=', True)]"/>
                     <separator/>
                     <filter string="My Opportunities" name="assigned_to_me"
                             domain="[('user_id', '=', uid)]"
@@ -585,6 +604,7 @@
                         <separator orientation="vertical" />
                         <filter string="Creation Month" context="{'group_by':'create_date:month'}" name="month"/>
                         <filter string="Expected Closing" context="{'group_by':'date_deadline'}"/>
+                        <filter string="Lost Reason" context="{'group_by':'lost_reason'}"/>
                     </group>
                 </search>
             </field>

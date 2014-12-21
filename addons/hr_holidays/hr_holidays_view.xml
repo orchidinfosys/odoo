@@ -33,8 +33,6 @@
                     <separator/>
                     <filter name="year" string="Year" domain="[('holiday_status_id.active','=',True)]" help="Filters only on allocations and requests that belong to an holiday type that is 'active' (active field is True)"/>
                     <separator/>
-                    <filter string="My Requests" name="my_leaves" domain="[('employee_id.user_id','=', uid)]" help="My Leave Requests"/>
-                    <separator/>
                     <filter string="To Do" name="todo" domain="[('payslip_status', '=', False), ('holiday_status_id.active', '=', True)]"/>
                     <separator/>
                     <filter string="My Department Leaves" help="My Department Leaves" domain="[('department_id.manager_id','=',uid)]"/>
@@ -624,7 +622,7 @@
                     <field name="leave_date_from"/>
                     <field name="leave_date_to"/>
                 </xpath>
-                <xpath expr="//div[@class='oe_employee_details']/ul/li[@id='last_login']" position="inside">
+                <xpath expr="//li[@id='last_login']" position="inside">
                     <span t-if="record.current_leave_id.raw_value" style="font-size: 100%%"
                             t-att-class="record.current_leave_state.raw_value=='validate'?'oe_kanban_button oe_kanban_color_3':'oe_kanban_button oe_kanban_color_2'"
                             t-att-title="moment(record.leave_date_from.raw_value).format('ddd do MMM') + ' - ' + moment(record.leave_date_to.raw_value).format('ddd do MMM')">

@@ -30,10 +30,10 @@ class crm_opportunity_report(osv.Model):
     _auto = False
     _description = "CRM Opportunity Analysis"
     _rec_name = 'date_deadline'
-    _inherit = ["crm.tracking.mixin"]
+    _inherit = ["utm.mixin"]
 
     _columns = {
-        'date_deadline': fields.date('Exp. Closing', readonly=True, help="Expected Closing"),
+        'date_deadline': fields.date('Expected Closing', readonly=True),
         'create_date': fields.datetime('Creation Date', readonly=True),
         'opening_date': fields.datetime('Assignation Date', readonly=True),
         'date_closed': fields.datetime('Close Date', readonly=True),
@@ -60,6 +60,7 @@ class crm_opportunity_report(osv.Model):
             ('lead','Lead'),
             ('opportunity','Opportunity'),
         ],'Type', help="Type is used to separate Leads and Opportunities"),
+        'lost_reason': fields.many2one('crm.lost.reason', 'Lost Reason', readonly=True),
     }
 
     def init(self, cr):
@@ -93,7 +94,8 @@ class crm_opportunity_report(osv.Model):
                     c.create_date as create_date,
                     extract('epoch' from (c.date_closed-c.create_date))/(3600*24) as  delay_close,
                     abs(extract('epoch' from (c.date_deadline - c.date_closed))/(3600*24)) as  delay_expected,
-                    extract('epoch' from (c.date_open-c.create_date))/(3600*24) as  delay_open
+                    extract('epoch' from (c.date_open-c.create_date))/(3600*24) as  delay_open,
+                    c.lost_reason
                 FROM
                     crm_lead c
                 WHERE c.active = 'true'

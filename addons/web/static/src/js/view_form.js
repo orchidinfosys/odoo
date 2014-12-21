@@ -101,7 +101,7 @@ instance.web.FormView = instance.web.View.extend(instance.web.form.FieldManagerM
         this.fields_order = [];
         this.datarecord = {};
         this._onchange_specs = {};
-        this.onchanges_defs = [];
+        this.onchanges_mutex = new $.Mutex();
         this.default_focus_field = null;
         this.default_focus_button = null;
         this.fields_registry = instance.web.form.widgets;
@@ -296,7 +296,7 @@ instance.web.FormView = instance.web.View.extend(instance.web.form.FieldManagerM
                 });
             });
         }
-        return shown.then(function() {
+        return $.when(shown, this._super()).then(function() {
             self._actualize_mode(options.mode || self.options.initial_mode);
             self.$el.css({
                 opacity: '1',
@@ -508,44 +508,45 @@ instance.web.FormView = instance.web.View.extend(instance.web.form.FieldManagerM
                 def = self.alive(new instance.web.Model(self.dataset.model).call(
                     "onchange", [ids, values, trigger_field_name, onchange_specs, context]));
             }
-            var onchange_def = def.then(function(response) {
-                if (widget && widget.field['change_default']) {
-                    var fieldname = widget.name;
-                    var value_;
-                    if (response.value && (fieldname in response.value)) {
-                        // Use value from onchange if onchange executed
-                        value_ = response.value[fieldname];
-                    } else {
-                        // otherwise get form value for field
-                        value_ = self.fields[fieldname].get_value();
-                    }
-                    var condition = fieldname + '=' + value_;
+            this.onchanges_mutex.exec(function(){
+                return def.then(function(response) {
+                    if (widget && widget.field['change_default']) {
+                        var fieldname = widget.name;
+                        var value_;
+                        if (response.value && (fieldname in response.value)) {
+                            // Use value from onchange if onchange executed
+                            value_ = response.value[fieldname];
+                        } else {
+                            // otherwise get form value for field
+                            value_ = self.fields[fieldname].get_value();
+                        }
+                        var condition = fieldname + '=' + value_;
 
-                    if (value_) {
-                        return self.alive(new instance.web.Model('ir.values').call(
-                            'get_defaults', [self.model, condition]
-                        )).then(function (results) {
-                            if (!results.length) {
+                        if (value_) {
+                            return self.alive(new instance.web.Model('ir.values').call(
+                                'get_defaults', [self.model, condition]
+                            )).then(function (results) {
+                                if (!results.length) {
+                                    return response;
+                                }
+                                if (!response.value) {
+                                    response.value = {};
+                                }
+                                for(var i=0; i<results.length; ++i) {
+                                    // [whatever, key, value]
+                                    var triplet = results[i];
+                                    response.value[triplet[1]] = triplet[2];
+                                }
                                 return response;
-                            }
-                            if (!response.value) {
-                                response.value = {};
-                            }
-                            for(var i=0; i<results.length; ++i) {
-                                // [whatever, key, value]
-                                var triplet = results[i];
-                                response.value[triplet[1]] = triplet[2];
-                            }
-                            return response;
-                        });
+                            });
+                        }
                     }
-                }
-                return response;
-            }).then(function(response) {
-                return self.on_processed_onchange(response);
+                    return response;
+                }).then(function(response) {
+                    return self.on_processed_onchange(response);
+                });
             });
-            this.onchanges_defs.push(onchange_def);
-            return onchange_def;
+            return this.onchanges_mutex.def;
         } catch(e) {
             console.error(e);
             instance.webclient.crashmanager.show_message(e);
@@ -586,21 +587,18 @@ instance.web.FormView = instance.web.View.extend(instance.web.form.FieldManagerM
         var self = this;
         return this.mutating_mutex.exec(function() {
             function iterate() {
-                var start = $.Deferred();
-                start.resolve();
-                start = _.reduce(self.onchanges_defs, function(memo, d){
-                    return memo.then(function(){
-                        return d;
-                    }, function(){
-                        return d;
-                    });
-                }, start);
-                var defs = [start];
+
+                var mutex = new $.Mutex();
                 _.each(self.fields, function(field) {
-                    defs.push(field.commit_value());
+                    self.onchanges_mutex.def.then(function(){
+                        mutex.exec(function(){
+                            return field.commit_value();
+                        });
+                    });
                 });
+
                 var args = _.toArray(arguments);
-                return $.when.apply($, defs).then(function() {
+                return $.when.apply(null, [mutex.def, self.onchanges_mutex.def]).then(function() {
                     var save_obj = self.save_list.pop();
                     if (save_obj) {
                         return self._process_save(save_obj).then(function() {
@@ -654,7 +652,7 @@ instance.web.FormView = instance.web.View.extend(instance.web.form.FieldManagerM
      * if the current record is not yet saved. It will then stay in create mode.
      */
     to_edit_mode: function() {
-        this.onchanges_defs = [];
+        this.onchanges_mutex = new $.Mutex();
         this._actualize_mode("edit");
     },
     /**
@@ -1516,50 +1514,54 @@ instance.web.form.FormRenderingEngine = instance.web.form.FormRenderingEngineInt
     },
     process_notebook: function($notebook) {
         var self = this;
+
+        // Extract useful info from the notebook xml declaration
         var pages = [];
         $notebook.find('> page').each(function() {
             var $page = $(this);
             var page_attrs = $page.getAttributes();
             page_attrs.id = _.uniqueId('notebook_page_');
-            var $new_page = self.render_element('FormRenderingNotebookPage', page_attrs);
-            $page.contents().appendTo($new_page);
-            $page.before($new_page).remove();
-            var ic = self.handle_common_properties($new_page, $page).invisibility_changer;
-            page_attrs.__page = $new_page;
-            page_attrs.__ic = ic;
+            page_attrs.contents = $page.html();
+            page_attrs.ref = $page;  // reference to the current page node in the xml declaration
             pages.push(page_attrs);
-
-            $new_page.children().each(function() {
-                self.process($(this));
-            });
         });
-        var $new_notebook = this.render_element('FormRenderingNotebook', { pages : pages });
-        $notebook.contents().appendTo($new_notebook);
+
+        // Render the notebook and replace $notebook with it
+        var $new_notebook = self.render_element('FormRenderingNotebook', {'pages': pages});
         $notebook.before($new_notebook).remove();
-        self.process($($new_notebook.children()[0]));
-        //tabs and invisibility handling
-        $new_notebook.tabs();
-        _.each(pages, function(page, i) {
-            if (! page.__ic)
-                return;
-            page.__ic.on("change:effective_invisible", null, function() {
-                if (!page.__ic.get('effective_invisible') && page.autofocus) {
-                    $new_notebook.tabs('select', i);
-                    return;
-                }
-                var current = $new_notebook.tabs("option", "selected");
-                if (! pages[current].__ic || ! pages[current].__ic.get("effective_invisible"))
-                    return;
-                var first_visible = _.find(_.range(pages.length), function(i2) {
-                    return (! pages[i2].__ic) || (! pages[i2].__ic.get("effective_invisible"));
-                });
-                if (first_visible !== undefined) {
-                    $new_notebook.tabs('select', first_visible);
-                }
-            });
-        });
 
-        this.handle_common_properties($new_notebook, $notebook);
+        // Bind the invisibility changers and find the page to display
+        var pageid_to_display;
+        _.each(pages, function(page) {
+            $tab = $new_notebook.find('a[href=#' + page.id + ']').parent();
+            $content = $new_notebook.find('#' + page.id);
+
+            // Case: <page autofocus="autofocus">;
+            // We attach the autofocus attribute to the node because it can be useful during the
+            // page execution
+            self.attach_node_attr($tab, page.ref, 'autofocus');
+            self.attach_node_attr($content, page.ref, 'autofocus');
+            if (!pageid_to_display && page.autofocus) {
+                // If multiple autofocus, keep the first one
+                pageid_to_display = page.id;
+            }
+
+            // Case: <page attrs="{'invisible': domain}">;
+            self.handle_common_properties($tab, page.ref, instance.web.form.NotebookInvisibilityChanger);
+            self.handle_common_properties($content, page.ref, instance.web.form.NotebookInvisibilityChanger);
+        });
+        if (!pageid_to_display) {
+            pageid_to_display = $new_notebook.find('div[role="tabpanel"]:not(.oe_form_invisible):first').attr('id');
+        }
+
+        // Display page. Note: we can't use bootstrap's show function because it is looking for
+        // document attached DOM, and the form view is only attached when everything is processed
+        $new_notebook.find('a[href=#' + pageid_to_display + ']').parent().addClass('active');
+        $new_notebook.find('#' + pageid_to_display).addClass('active in'); // `in` class is required for bootstrap's fade
+
+        self.process($new_notebook.children());
+        self.handle_common_properties($new_notebook, $notebook);
+
         return $new_notebook;
     },
     process_separator: function($separator) {
@@ -1593,16 +1595,25 @@ instance.web.form.FormRenderingEngine = instance.web.form.FormRenderingEngineInt
         }
         return $new_label;
     },
-    handle_common_properties: function($new_element, $node) {
+    handle_common_properties: function($new_element, $node, InvisibilityChanger) {
         var str_modifiers = $node.attr("modifiers") || "{}";
         var modifiers = JSON.parse(str_modifiers);
         var ic = null;
-        if (modifiers.invisible !== undefined)
-            ic = new instance.web.form.InvisibilityChanger(this.view, this.view, modifiers.invisible, $new_element);
+        if (modifiers.invisible !== undefined) {
+            var InvisibilityChangerCls = InvisibilityChanger || instance.web.form.InvisibilityChanger;
+            ic = new InvisibilityChangerCls(this.view, this.view, modifiers.invisible, $new_element);
+        }
         $new_element.addClass($node.attr("class") || "");
         $new_element.attr('style', $node.attr('style'));
         return {invisibility_changer: ic,};
     },
+    /**
+    * Attach a node attribute to an html element to be able to use it after
+    * the processing of the page.
+    */
+    attach_node_attr: function($new_element, $node, attr) {
+        $new_element.data('autofocus', $node.attr(attr));
+    }
 });
 
 /**
@@ -1773,6 +1784,39 @@ instance.web.form.InvisibilityChanger = instance.web.Class.extend(instance.web.P
         this.start();
     },
 });
+
+// Specialization of InvisibilityChanger for the `notebook` form element to handle more
+// elegantly its special cases (i.e. activate the closest visible sibling)
+instance.web.form.NotebookInvisibilityChanger = instance.web.form.InvisibilityChanger.extend({
+    _check_visibility: function() {
+        this._super();
+        if (this.get("effective_invisible") === true) {
+            // Switch to invisible
+            // Remove this element as active and set a visible sibling active (if there is one)
+            if (this.$el.hasClass('active')) {
+                this.$el.removeClass('active in');
+                var visible_siblings = this.$el.siblings(':not(.oe_form_invisible)');
+                if (visible_siblings.length) {
+                    $(visible_siblings[0]).addClass('active in');
+                }
+            }
+        } else {
+            // Switch to visible
+            // If there is no visible active sibling, set this element as active,
+            // otherwise:
+            //      if that sibling has autofocus, do nothing
+            //      otherwise, remove that sibling as active and set this element as active
+            var visible_active_sibling = this.$el.siblings(':not(.oe_form_invisible).active');
+            if (!(visible_active_sibling.length)) {
+                this.$el.addClass('active in');
+            } else if (!$(visible_active_sibling[0]).data('autofocus')) {
+                this.$el.addClass('active in');
+                $(visible_active_sibling[0]).removeClass('active in');
+            }
+        }
+    },
+});
+
 
 /**
     Base class for all fields, custom widgets and buttons to be displayed in the form view.
@@ -3258,7 +3302,6 @@ instance.web.form.FieldRadio = instance.web.form.AbstractField.extend(instance.w
     render_value: function () {
         var self = this;
         this.$el.toggleClass("oe_readonly", this.get('effective_readonly'));
-        this.$("input:checked").prop("checked", false);
         if (this.get_value()) {
             this.$("input").filter(function () {return this.value == self.get_value();}).prop("checked", true);
             this.$(".oe_radio_readonly").text(this.get('value') ? this.get('value')[1] : "");
@@ -4372,7 +4415,6 @@ instance.web.form.One2ManyListView = instance.web.ListView.extend({
         if (!this.fields_view || !this.editable()){
             return true;
         }
-        this.o2m._dirty_flag = true;
         var r;
         return _.every(this.records.records, function(record){
             r = record;
@@ -4868,6 +4910,7 @@ instance.web.form.Many2ManyListView = instance.web.ListView.extend(/** @lends in
             this.model,
             {
                 title: _t("Add: ") + this.m2m_field.string,
+                alternative_form_view: this.m2m_field.field.views ? this.m2m_field.field.views["form"] : undefined,
                 no_create: this.m2m_field.options.no_create,
             },
             new instance.web.CompoundDomain(this.m2m_field.build_domain(), ["!", ["id", "in", this.m2m_field.dataset.ids]]),
@@ -4893,6 +4936,7 @@ instance.web.form.Many2ManyListView = instance.web.ListView.extend(/** @lends in
         var pop = new instance.web.form.FormOpenPopup(this);
         pop.show_element(this.dataset.model, id, this.m2m_field.build_context(), {
             title: _t("Open: ") + this.m2m_field.string,
+            alternative_form_view: this.m2m_field.field.views ? this.m2m_field.field.views["form"] : undefined,
             readonly: this.getParent().get("effective_readonly")
         });
         pop.on('write_completed', self, self.reload_content);
@@ -5732,7 +5776,7 @@ instance.web.form.FieldBinaryImage = instance.web.form.FieldBinary.extend({
  * Options on attribute ; "blockui" {Boolean} block the UI or not
  * during the file is uploading
  */
-instance.web.form.FieldMany2ManyBinaryMultiFiles = instance.web.form.AbstractField.extend({
+instance.web.form.FieldMany2ManyBinaryMultiFiles = instance.web.form.AbstractField.extend(instance.web.form.ReinitializeFieldMixin, {
     template: "FieldBinaryFileUploader",
     init: function(field_manager, node) {
         this._super(field_manager, node);
@@ -5747,8 +5791,7 @@ instance.web.form.FieldMany2ManyBinaryMultiFiles = instance.web.form.AbstractFie
         this.fileupload_id = _.uniqueId('oe_fileupload_temp');
         $(window).on(this.fileupload_id, _.bind(this.on_file_loaded, this));
     },
-    start: function() {
-        this._super(this);
+    initialize_content: function() {
         this.$el.on('change', 'input.oe_form_binary_file', this.on_file_change );
     },
     // WARNING: duplicated in 4 other M2M widgets
@@ -6234,7 +6277,12 @@ instance.web.form.StatInfo = instance.web.form.AbstractField.extend({
             value: this.get("value") || 0,
         };
         if (! this.node.attrs.nolabel) {
-            options.text = this.string
+            if(this.options.label_field && this.view.datarecord[this.options.label_field]) {
+                options.text = this.view.datarecord[this.options.label_field];
+            }
+            else {
+                options.text = this.string;
+            }
         }
         this.$el.html(QWeb.render("StatInfo", options));
     },

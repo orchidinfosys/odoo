@@ -796,6 +796,7 @@ class Session(http.Controller):
             "user_context": request.session.get_context() if request.session.uid else {},
             "db": request.session.db,
             "username": request.session.login,
+            "company_id": request.env.user.company_id.id if request.session.uid else None,
         }
 
     @http.route('/web/session/get_session_info', type='json', auth="none")
@@ -1016,19 +1017,6 @@ class View(http.Controller):
         }, request.context)
         return {'result': True}
 
-    @http.route('/web/view/undo_custom', type='json', auth="user")
-    def undo_custom(self, view_id, reset=False):
-        CustomView = request.session.model('ir.ui.view.custom')
-        vcustom = CustomView.search([('user_id', '=', request.session.uid), ('ref_id' ,'=', view_id)],
-                                    0, False, False, request.context)
-        if vcustom:
-            if reset:
-                CustomView.unlink(vcustom, request.context)
-            else:
-                CustomView.unlink([vcustom[0]], request.context)
-            return {'result': True}
-        return {'result': False}
-
 class TreeView(View):
 
     @http.route('/web/treeview/action', type='json', auth="user")
@@ -1042,7 +1030,8 @@ class Binary(http.Controller):
     @http.route('/web/binary/image', type='http', auth="public")
     def image(self, model, id, field, **kw):
         last_update = '__last_update'
-        Model = request.session.model(model)
+        Model = request.registry[model]
+        cr, uid, context = request.cr, request.uid, request.context
         headers = [('Content-Type', 'image/png')]
         etag = request.httprequest.headers.get('If-None-Match')
         hashed_session = hashlib.md5(request.session_id).hexdigest()
@@ -1055,15 +1044,15 @@ class Binary(http.Controller):
                 if not id and hashed_session == etag:
                     return werkzeug.wrappers.Response(status=304)
                 else:
-                    date = Model.read([id], [last_update], request.context)[0].get(last_update)
+                    date = Model.read(cr, uid, [id], [last_update], context)[0].get(last_update)
                     if hashlib.md5(date).hexdigest() == etag:
                         return werkzeug.wrappers.Response(status=304)
 
             if not id:
-                res = Model.default_get([field], request.context).get(field)
+                res = Model.default_get(cr, uid, [field], context).get(field)
                 image_base64 = res
             else:
-                res = Model.read([id], [last_update, field], request.context)[0]
+                res = Model.read(cr, uid, [id], [last_update, field], context)[0]
                 retag = hashlib.md5(res.get(last_update)).hexdigest()
                 image_base64 = res.get(field)
 
@@ -1109,14 +1098,15 @@ class Binary(http.Controller):
         :param str filename_field: field holding the file's name, if any
         :returns: :class:`werkzeug.wrappers.Response`
         """
-        Model = request.session.model(model)
+        Model = request.registry[model]
+        cr, uid, context = request.cr, request.uid, request.context
         fields = [field]
         if filename_field:
             fields.append(filename_field)
         if id:
-            res = Model.read([int(id)], fields, request.context)[0]
+            res = Model.read(cr, uid, [int(id)], fields, context)[0]
         else:
-            res = Model.default_get(fields, request.context)
+            res = Model.default_get(cr, uid, fields, context)
         filecontent = base64.b64decode(res.get(field, ''))
         if not filecontent:
             return request.not_found()
@@ -1572,6 +1562,7 @@ class Reports(http.Controller):
     @serialize_exception
     def index(self, action, token):
         action = simplejson.loads(action)
+
         report_srv = request.session.proxy("report")
         context = dict(request.context)
         context.update(action["context"])
@@ -1614,14 +1605,12 @@ class Reports(http.Controller):
             else:
                 file_name = action['report_name']
         file_name = '%s.%s' % (file_name, report_struct['format'])
-        headers=[
-             ('Content-Disposition', content_disposition(file_name)),
-             ('Content-Type', report_mimetype),
-             ('Content-Length', len(report))]
-        if action.get('pdf_viewer'):
-            del headers[0]
+
         return request.make_response(report,
-             headers=headers,
+             headers=[
+                 ('Content-Disposition', content_disposition(file_name)),
+                 ('Content-Type', report_mimetype),
+                 ('Content-Length', len(report))],
              cookies={'fileToken': token})
 
 class Apps(http.Controller):
@@ -1648,7 +1637,3 @@ class Apps(http.Controller):
         sakey = Session().save_session_action(action)
         debug = '?debug' if req.debug else ''
         return werkzeug.utils.redirect('/web{0}#sa={1}'.format(debug, sakey))
-
-
-
-# vim:expandtab:tabstop=4:softtabstop=4:shiftwidth=4:

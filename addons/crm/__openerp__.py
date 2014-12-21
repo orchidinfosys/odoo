@@ -58,6 +58,7 @@ Dashboard for CRM will include:
         'resource',
         'board',
         'fetchmail',
+        'utm',
     ],
     'data': [
         'crm_data.xml',
@@ -94,6 +95,7 @@ Dashboard for CRM will include:
         'base_partner_merge_view.xml',
 
         'sales_team_view.xml',
+        'views/crm.xml',
     ],
     'demo': [
         'crm_demo.xml',
@@ -114,6 +116,7 @@ Dashboard for CRM will include:
         'test/crm_lead_unlink.yml',
         'test/crm_lead_find_stage.yml',
     ],
+    'css': ['static/src/css/crm.css'],
     'installable': True,
     'application': True,
     'auto_install': False,

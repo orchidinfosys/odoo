@@ -11,10 +11,6 @@
                     <group>
                         <label for="id" string="Invoicing Process"/>
                         <div>
-                            <div name="group_invoice_so_lines">
-                                <field name="group_invoice_so_lines" class="oe_inline"/>
-                                <label for="group_invoice_so_lines"/>
-                            </div>
                             <div name="timesheet">
                                 <field name="timesheet" class="oe_inline" on_change="onchange_timesheet(timesheet)"/>
                                 <label for="timesheet"/>
@@ -78,6 +74,10 @@
                     <div name="module_sale_margin">
                         <field name="module_sale_margin" class="oe_inline"/>
                         <label for="module_sale_margin"/>
+                    </div>
+                    <div name="module_sale_layout">
+                        <field name="module_sale_layout" class="oe_inline"/>
+                        <label for="module_sale_layout"/>
                     </div>
                 </div>
                 <div name="customer feature" position="after">
