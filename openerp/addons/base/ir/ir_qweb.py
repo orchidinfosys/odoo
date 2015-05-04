@@ -29,10 +29,13 @@ import openerp.tools.lru
 from openerp.http import request
 from openerp.tools.safe_eval import safe_eval as eval
 from openerp.osv import osv, orm, fields
-from openerp.tools import html_escape as escape, which
+from openerp.tools import html_escape as escape
+from openerp.tools.misc import find_in_path
 from openerp.tools.translate import _
 
 _logger = logging.getLogger(__name__)
+
+MAX_CSS_RULES = 4095
 
 #--------------------------------------------------------------------
 # QWeb template engine
@@ -61,6 +64,12 @@ def raise_qweb_exception(etype=None, **kw):
         # Will use `raise foo from bar` in python 3 and rename cause to __cause__
         e.qweb['cause'] = original
         raise
+
+def _build_attribute(name, value):
+    value = escape(value)
+    if isinstance(name, unicode): name = name.encode('utf-8')
+    if isinstance(value, unicode): value = value.encode('utf-8')
+    return ' %s="%s"' % (name, value)
 
 class FileSystemLoader(object):
     def __init__(self, path):
@@ -243,10 +252,12 @@ class QWeb(orm.AbstractModel):
         stack.append(id_or_xml_id)
         qwebcontext['__stack__'] = stack
         qwebcontext['xmlid'] = str(stack[0]) # Temporary fix
-        return self.render_node(self.get_template(id_or_xml_id, qwebcontext), qwebcontext)
 
-    def render_node(self, element, qwebcontext):
-        generated_attributes = ""
+        element = self.get_template(id_or_xml_id, qwebcontext)
+        element.attrib.pop("name", False)
+        return self.render_node(element, qwebcontext, generated_attributes=qwebcontext.pop('generated_attributes', ''))
+
+    def render_node(self, element, qwebcontext, generated_attributes=''):
         t_render = None
         template_attributes = {}
 
@@ -275,8 +286,6 @@ class QWeb(orm.AbstractModel):
                             self, element, attribute_name, attribute_value, qwebcontext)
                         for att, val in attrs:
                             if not val: continue
-                            if not isinstance(val, str):
-                                val = unicode(val).encode('utf-8')
                             generated_attributes += self.render_attribute(element, att, val, qwebcontext)
                         break
                 else:
@@ -304,19 +313,20 @@ class QWeb(orm.AbstractModel):
         # generated_attributes: generated attributes
         # qwebcontext: values
         # inner: optional innerXml
+        name = str(element.tag)
         if inner:
             g_inner = inner.encode('utf-8') if isinstance(inner, unicode) else inner
         else:
             g_inner = [] if element.text is None else [self.render_text(element.text, element, qwebcontext)]
             for current_node in element.iterchildren(tag=etree.Element):
                 try:
-                    g_inner.append(self.render_node(current_node, qwebcontext))
+                    g_inner.append(self.render_node(current_node, qwebcontext,
+                        generated_attributes= name == "t" and generated_attributes or ''))
                 except QWebException:
                     raise
                 except Exception:
                     template = qwebcontext.get('__template__')
                     raise_qweb_exception(message="Could not render element %r" % element.tag, node=element, template=template)
-        name = str(element.tag)
         inner = "".join(g_inner)
         trim = template_attributes.get("trim", 0)
         if trim == 0:
@@ -338,7 +348,7 @@ class QWeb(orm.AbstractModel):
             return "<%s%s/>" % (name, generated_attributes)
 
     def render_attribute(self, element, name, value, qwebcontext):
-        return ' %s="%s"' % (name, escape(value))
+        return _build_attribute(name, value)
 
     def render_text(self, text, element, qwebcontext):
         return text.encode('utf-8')
@@ -418,6 +428,10 @@ class QWeb(orm.AbstractModel):
                     '%s_odd' % varname: False,
                 })
             ru.append(self.render_element(element, template_attributes, generated_attributes, copy_qwebcontext))
+
+        for k in qwebcontext.keys():
+            qwebcontext[k] = copy_qwebcontext[k]
+
         return "".join(ru)
 
     def render_tag_if(self, element, template_attributes, generated_attributes, qwebcontext):
@@ -427,6 +441,14 @@ class QWeb(orm.AbstractModel):
 
     def render_tag_call(self, element, template_attributes, generated_attributes, qwebcontext):
         d = qwebcontext.copy()
+
+        if 'lang' in template_attributes:
+            init_lang = d.context.get('lang', 'en_US')
+            lang = template_attributes['lang']
+            d.context['lang'] = self.eval(lang, d) or lang
+            if not self.pool['res.lang'].search(d.cr, d.uid, [('code', '=', lang)], count=True, context=d.context):
+                _logger.info("'%s' is not a valid language code, is an empty field or is not installed, falling back to en_US", lang)
+
         d[0] = self.render_element(element, template_attributes, generated_attributes, d)
         cr = d.get('request') and d['request'].cr or None
         uid = d.get('request') and d['request'].uid or None
@@ -436,7 +458,15 @@ class QWeb(orm.AbstractModel):
             template = int(template)
         except ValueError:
             pass
-        return self.render(cr, uid, template, d)
+
+        d['generated_attributes'] = generated_attributes
+        res = self.render(cr, uid, template, d)
+
+        # we need to reset the lang after the rendering
+        if 'lang' in template_attributes:
+            d.context['lang'] = init_lang
+
+        return res
 
     def render_tag_call_assets(self, element, template_attributes, generated_attributes, qwebcontext):
         """ This special 't-call' tag can be used in order to aggregate/minify javascript and css assets"""
@@ -451,7 +481,8 @@ class QWeb(orm.AbstractModel):
         bundle = AssetsBundle(xmlid, cr=cr, uid=uid, context=context, registry=self.pool)
         css = self.get_attr_bool(template_attributes.get('css'), default=True)
         js = self.get_attr_bool(template_attributes.get('js'), default=True)
-        return bundle.to_html(css=css, js=js, debug=bool(qwebcontext.get('debug')))
+        async = self.get_attr_bool(template_attributes.get('async'), default=False)
+        return bundle.to_html(css=css, js=js, debug=bool(qwebcontext.get('debug')), async=async)
 
     def render_tag_set(self, element, template_attributes, generated_attributes, qwebcontext):
         if "value" in template_attributes:
@@ -475,7 +506,9 @@ class QWeb(orm.AbstractModel):
         record = self.eval_object(record, qwebcontext)
 
         field = record._fields[field_name]
-        options = json.loads(template_attributes.get('field-options') or '{}')
+        foptions = self.eval_format(template_attributes.get('field-options') or '{}', qwebcontext)
+        options = json.loads(foptions)
+
         field_type = get_field_type(field, options)
 
         converter = self.get_converter_for(field_type)
@@ -546,19 +579,23 @@ class FieldConverter(osv.AbstractModel):
           ``type``, may not be any Field subclass name)
         * ``translate``, a boolean flag (``0`` or ``1``) denoting whether the
           field is translatable
+        * ``readonly``, has this attribute if the field is readonly
         * ``expression``, the original expression
 
         :returns: iterable of (attribute name, attribute value) pairs.
         """
         field = record._fields[field_name]
         field_type = get_field_type(field, options)
-        return [
+        data = [
             ('data-oe-model', record._name),
             ('data-oe-id', record.id),
             ('data-oe-field', field_name),
             ('data-oe-type', field_type),
             ('data-oe-expression', t_att['field']),
         ]
+        if record._fields[field_name].readonly:
+            data.append(('data-oe-readonly', 1))
+        return data
 
     def value_to_html(self, cr, uid, value, field, options=None, context=None):
         """ value_to_html(cr, uid, value, field, options=None, context=None)
@@ -606,7 +643,7 @@ class FieldConverter(osv.AbstractModel):
         if inherit_branding:
             # add branding attributes
             g_att += ''.join(
-                ' %s="%s"' % (name, escape(value))
+                _build_attribute(name, value)
                 for name, value in self.attributes(
                     cr, uid, field_name, record, options,
                     source_element, g_att, t_att, qweb_context)
@@ -641,10 +678,7 @@ class FieldConverter(osv.AbstractModel):
         lang_code = context.get('lang') or 'en_US'
         Lang = self.pool['res.lang']
 
-        lang_ids = Lang.search(cr, uid, [('code', '=', lang_code)], context=context) \
-               or  Lang.search(cr, uid, [('code', '=', 'en_US')], context=context)
-
-        return Lang.browse(cr, uid, lang_ids[0], context=context)
+        return Lang.browse(cr, uid, Lang._lang_get(cr, uid, lang_code), context=context)
 
 class FloatConverter(osv.AbstractModel):
     _name = 'ir.qweb.field.float'
@@ -787,7 +821,9 @@ class ImageConverter(osv.AbstractModel):
 
 class MonetaryConverter(osv.AbstractModel):
     """ ``monetary`` converter, has a mandatory option
-    ``display_currency``.
+    ``display_currency`` only if field is not of type Monetary.
+    Otherwise, if we are in presence of a monetary field, the field definition must
+    have a currency_field attribute set.
 
     The currency is used for formatting *and rounding* of the float value. It
     is assumed that the linked res_currency has a non-empty rounding value and
@@ -811,19 +847,21 @@ class MonetaryConverter(osv.AbstractModel):
         if context is None:
             context = {}
         Currency = self.pool['res.currency']
-        display_currency = self.display_currency(cr, uid, options['display_currency'], options)
+        cur_field = record._fields[field_name]
+        display_currency = False
+        #currency should be specified by monetary field
+        if cur_field.type == 'monetary' and cur_field.currency_field:
+            display_currency = record[cur_field.currency_field]
+        #otherwise fall back to old method
+        if not display_currency:
+            display_currency = self.display_currency(cr, uid, options['display_currency'], options)
 
         # lang.format mandates a sprintf-style format. These formats are non-
         # minimal (they have a default fixed precision instead), and
         # lang.format will not set one by default. currency.round will not
         # provide one either. So we need to generate a precision value
         # (integer > 0) from the currency's rounding (a float generally < 1.0).
-        #
-        # The log10 of the rounding should be the number of digits involved if
-        # negative, if positive clamp to 0 digits and call it a day.
-        # nb: int() ~ floor(), we want nearest rounding instead
-        precision = int(math.floor(math.log10(display_currency.rounding)))
-        fmt = "%.{0}f".format(-precision if precision < 0 else 0)
+        fmt = "%.{0}f".format(display_currency.decimal_places)
 
         from_amount = record[field_name]
 
@@ -1118,7 +1156,7 @@ class AssetsBundle(object):
     def can_aggregate(self, url):
         return not urlparse(url).netloc and not url.startswith(('/web/css', '/web/js'))
 
-    def to_html(self, sep=None, css=True, js=True, debug=False):
+    def to_html(self, sep=None, css=True, js=True, debug=False, async=False):
         if sep is None:
             sep = '\n            '
         response = []
@@ -1136,11 +1174,16 @@ class AssetsBundle(object):
         else:
             url_for = self.context.get('url_for', lambda url: url)
             if css and self.stylesheets:
-                href = '/web/css/%s/%s' % (self.xmlid, self.version)
+                suffix = ''
+                if request:
+                    ua = request.httprequest.user_agent
+                    if ua.browser == "msie" and int((ua.version or '0').split('.')[0]) < 10:
+                        suffix = '.0'
+                href = '/web/css%s/%s/%s' % (suffix, self.xmlid, self.version)
                 response.append('<link href="%s" rel="stylesheet"/>' % url_for(href))
             if js:
                 src = '/web/js/%s/%s' % (self.xmlid, self.version)
-                response.append('<script type="text/javascript" src="%s"></script>' % url_for(src))
+                response.append('<script %s type="text/javascript" src="%s"></script>' % (async and 'async="async"' or '', url_for(src)))
         response.extend(self.remains)
         return sep + sep.join(response)
 
@@ -1172,8 +1215,11 @@ class AssetsBundle(object):
             self.set_cache('js', content)
         return content
 
-    def css(self):
+    def css(self, page_number=None):
         """Generate css content from given bundle"""
+        if page_number is not None:
+            return self.css_page(page_number)
+
         content = self.get_cache('css')
         if content is None:
             content = self.preprocess_css()
@@ -1192,10 +1238,41 @@ class AssetsBundle(object):
 
             matches.append(content)
             content = u'\n'.join(matches)
-            if self.css_errors:
-                return content
-            self.set_cache('css', content)
+            if not self.css_errors:
+                self.set_cache('css', content)
+            content = content.encode('utf-8')
 
+        return content
+
+    def css_page(self, page_number):
+        content = self.get_cache('css.%d' % (page_number,))
+        if page_number:
+            return content
+        if content is None:
+            css = self.css().decode('utf-8')
+            re_rules = '([^{]+\{(?:[^{}]|\{[^{}]*\})*\})'
+            re_selectors = '()(?:\s*@media\s*[^{]*\{)?(?:\s*(?:[^,{]*(?:,|\{(?:[^}]*\}))))'
+            css_url = '@import url(\'/web/css.%%d/%s/%s\');' % (self.xmlid, self.version)
+            pages = [[]]
+            page = pages[0]
+            page_selectors = 0
+            for rule in re.findall(re_rules, css):
+                selectors = len(re.findall(re_selectors, rule))
+                if page_selectors + selectors < MAX_CSS_RULES:
+                    page_selectors += selectors
+                    page.append(rule)
+                else:
+                    pages.append([rule])
+                    page = pages[-1]
+                    page_selectors = selectors
+            if len(pages) == 1:
+                pages = []
+            for idx, page in enumerate(pages):
+                self.set_cache("css.%d" % (idx+1), ''.join(page))
+            content = '\n'.join(css_url % i for i in range(1,len(pages)+1))
+            self.set_cache("css.0", content)
+        if not content:
+            return self.css()
         return content
 
     def get_cache(self, type):
@@ -1522,18 +1599,22 @@ class SassStylesheetAsset(PreprocessedCSS):
         return "/*! %s */\n%s" % (self.id, content)
 
     def get_command(self):
-        defpath = os.environ.get('PATH', os.defpath).split(os.pathsep)
-        sass = which('sass', path=os.pathsep.join(defpath))
+        try:
+            sass = find_in_path('sass')
+        except IOError:
+            sass = 'sass'
         return [sass, '--stdin', '-t', 'compressed', '--unix-newlines', '--compass',
                 '-r', 'bootstrap-sass']
 
 class LessStylesheetAsset(PreprocessedCSS):
     def get_command(self):
-        defpath = os.environ.get('PATH', os.defpath).split(os.pathsep)
-        if os.name == 'nt':
-            lessc = which('lessc.cmd', path=os.pathsep.join(defpath))
-        else:
-            lessc = which('lessc', path=os.pathsep.join(defpath))
+        try:
+            if os.name == 'nt':
+                lessc = find_in_path('lessc.cmd')
+            else:
+                lessc = find_in_path('lessc')
+        except IOError:
+            lessc = 'lessc'
         webpath = openerp.http.addons_manifest['web']['addons_path']
         lesspath = os.path.join(webpath, 'web', 'static', 'lib', 'bootstrap', 'less')
         return [lessc, '-', '--clean-css', '--no-js', '--no-color', '--include-path=%s' % lesspath]
@@ -1581,5 +1662,3 @@ def rjsmin(script):
         r']*\*+(?:[^/*][^*]*\*+)*/))*)+', subber, '\n%s\n' % script
     ).strip()
     return result
-
-# vim:et:

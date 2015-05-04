@@ -63,11 +63,8 @@ class crm_stage(osv.Model):
 
     _defaults = {
         'sequence': 1,
-        'probability': 0.0,
-        'on_change': True,
+        'probability': 1.0,
         'fold': False,
         'type': 'both',
         'case_default': True,
     }
-
-# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:

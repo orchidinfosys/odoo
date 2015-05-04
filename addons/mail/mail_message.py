@@ -26,10 +26,11 @@ from openerp import tools
 from email.header import decode_header
 from email.utils import formataddr
 from openerp import SUPERUSER_ID, api
-from openerp.osv import osv, orm, fields
+from openerp.osv import osv, fields
 from openerp.tools import html_email_clean
 from openerp.tools.translate import _
 from HTMLParser import HTMLParser
+from openerp.exceptions import UserError, AccessError
 
 _logger = logging.getLogger(__name__)
 
@@ -174,7 +175,7 @@ class mail_message(osv.Model):
             return formataddr((this.name, '%s@%s' % (this.alias_name, this.alias_domain)))
         elif this.email:
             return formataddr((this.name, this.email))
-        raise osv.except_osv(_('Invalid Action!'), _("Unable to send email, please configure the sender's email address or alias."))
+        raise UserError(_("Unable to send email, please configure the sender's email address or alias."))
 
     def _get_default_author(self, cr, uid, context=None):
         return self.pool.get('res.users').browse(cr, SUPERUSER_ID, uid, context=context).partner_id.id
@@ -600,7 +601,8 @@ class mail_message(osv.Model):
 
     def _find_allowed_model_wise(self, cr, uid, doc_model, doc_dict, context=None):
         doc_ids = doc_dict.keys()
-        allowed_doc_ids = self.pool[doc_model].search(cr, uid, [('id', 'in', doc_ids)], context=context)
+        ctx = dict(context or {}, active_test=False)
+        allowed_doc_ids = self.pool[doc_model].search(cr, uid, [('id', 'in', doc_ids)], context=ctx)
         return set([message_id for allowed_doc_id in allowed_doc_ids for message_id in doc_dict[allowed_doc_id]])
 
     def _find_allowed_doc_ids(self, cr, uid, model_ids, context=None):
@@ -618,6 +620,9 @@ class mail_message(osv.Model):
             ids uid could not see according to our custom rules. Please refer
             to check_access_rule for more details about those rules.
 
+            Non employees users see only message with subtype (aka do not see
+            internal logs).
+
             After having received ids of a classic search, keep only:
             - if author_id == pid, uid is the author, OR
             - a notification (id, pid) exists, uid has been notified, OR
@@ -629,6 +634,9 @@ class mail_message(osv.Model):
             return super(mail_message, self)._search(
                 cr, uid, args, offset=offset, limit=limit, order=order,
                 context=context, count=count, access_rights_uid=access_rights_uid)
+        # Non-employee see only messages with a subtype (aka, no internal logs)
+        if not self.pool['res.users'].has_group(cr, uid, 'base.group_user'):
+            args = ['&', ('subtype_id', '!=', False)] + list(args)
         # Perform a super with count as False, to have the ids, not a counter
         ids = super(mail_message, self)._search(
             cr, uid, args, offset=offset, limit=limit, order=order,
@@ -687,6 +695,9 @@ class mail_message(osv.Model):
             - unlink: if
                 - uid has write or create access on the related document if model, res_id
                 - otherwise: raise
+
+        Specific case: non employee users see only messages with subtype (aka do
+        not see internal logs).
         """
         def _generate_model_record_ids(msg_val, msg_ids):
             """ :param model_record_ids: {'model': {'res_id': (msg_id, msg_id)}, ... }
@@ -703,6 +714,13 @@ class mail_message(osv.Model):
             return
         if isinstance(ids, (int, long)):
             ids = [ids]
+        # Non employees see only messages with a subtype (aka, not internal logs)
+        if not self.pool['res.users'].has_group(cr, uid, 'base.group_user'):
+            cr.execute('SELECT DISTINCT id FROM "%s" WHERE type = %%s AND subtype_id IS NULL AND id = ANY (%%s)' % (self._table), ('comment', ids,))
+            if cr.fetchall():
+                raise AccessError(_('The requested operation cannot be completed due to security restrictions. Please contact your system administrator.\n\n(Document type: %s, Operation: %s)') % \
+                        (self._description, operation))
+
         not_obj = self.pool.get('mail.notification')
         fol_obj = self.pool.get('mail.followers')
         partner_id = self.pool['res.users'].browse(cr, SUPERUSER_ID, uid, context=None).partner_id.id
@@ -770,16 +788,19 @@ class mail_message(osv.Model):
         other_ids = other_ids.difference(set(document_related_ids))
         if not other_ids:
             return
-        raise orm.except_orm(_('Access Denied'),
-                             _('The requested operation cannot be completed due to security restrictions. Please contact your system administrator.\n\n(Document type: %s, Operation: %s)') %
+        raise AccessError(_('The requested operation cannot be completed due to security restrictions. Please contact your system administrator.\n\n(Document type: %s, Operation: %s)') %
                              (self._description, operation))
 
     def _get_record_name(self, cr, uid, values, context=None):
         """ Return the related document name, using name_get. It is done using
             SUPERUSER_ID, to be sure to have the record name correctly stored. """
-        if not values.get('model') or not values.get('res_id') or values['model'] not in self.pool:
+        if context is None:
+            context = {}
+        model = values.get('model', context.get('default_model'))
+        res_id = values.get('res_id', context.get('default_res_id'))
+        if not model or not res_id or model not in self.pool:
             return False
-        return self.pool[values['model']].name_get(cr, SUPERUSER_ID, [values['res_id']], context=context)[0][1]
+        return self.pool[model].name_get(cr, SUPERUSER_ID, [res_id], context=context)[0][1]
 
     def _get_reply_to(self, cr, uid, values, context=None):
         """ Return a specific reply_to: alias of the document through message_get_reply_to

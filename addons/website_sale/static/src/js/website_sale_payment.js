@@ -1,3 +1,8 @@
+odoo.define('website_sale.payment', function (require) {
+"use strict";
+
+var ajax = require('web.ajax');
+
 $(document).ready(function () {
 
     // When choosing an acquirer, display its Pay Now button
@@ -10,7 +15,7 @@ $(document).ready(function () {
         .find("input[name='acquirer']:checked").click();
 
     // When clicking on payment button: create the tx using json then continue to the acquirer
-    $payment.on("click", 'button[type="submit"]', function (ev) {
+    $payment.on("click", 'button[type="submit"],button[name="submit"]', function (ev) {
       ev.preventDefault();
       ev.stopPropagation();
       var $form = $(ev.currentTarget).parents('form');
@@ -18,9 +23,11 @@ $(document).ready(function () {
       if (! acquirer_id) {
         return false;
       }
-      openerp.jsonRpc('/shop/payment/transaction/' + acquirer_id, 'call', {}).then(function (data) {
+      ajax.jsonRpc('/shop/payment/transaction/' + acquirer_id, 'call', {}).then(function () {
         $form.submit();
       });
    });
+
+});
 
 });

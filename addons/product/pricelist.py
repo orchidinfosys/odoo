@@ -24,9 +24,9 @@ import time
 from openerp import tools
 from openerp.osv import fields, osv
 from openerp.tools.translate import _
-from openerp.exceptions import except_orm
 
 import openerp.addons.decimal_precision as dp
+from openerp.exceptions import UserError
 
 
 class price_type(osv.osv):
@@ -212,7 +212,7 @@ class product_pricelist(osv.osv):
                 version = v
                 break
         if not version:
-            raise osv.except_osv(_('Warning!'), _("At least one pricelist has no active version !\nPlease create or activate one."))
+            raise UserError(_("At least one pricelist has no active version !\nPlease create or activate one."))
         categ_ids = {}
         for p in products:
             categ = p.categ_id
@@ -247,19 +247,29 @@ class product_pricelist(osv.osv):
 
         results = {}
         for product, qty, partner in products_by_qty_by_partner:
-            uom_price_already_computed = False
             results[product.id] = 0.0
-            price = False
             rule_id = False
+
+            # Final unit price is computed according to `qty` in the `qty_uom_id` UoM.
+            # An intermediary unit price may be computed according to a different UoM, in
+            # which case the price_uom_id contains that UoM.
+            # The final price will be converted to match `qty_uom_id`.
+            qty_uom_id = context.get('uom') or product.uom_id.id
+            price_uom_id = product.uom_id.id
+            qty_in_product_uom = qty
+            if qty_uom_id != product.uom_id.id:
+                try:
+                    qty_in_product_uom = product_uom_obj._compute_qty(
+                        cr, uid, context['uom'], qty, product.uom_id.id or product.uos_id.id)
+                except UserError:
+                    # Ignored - incompatible UoM in context, use default product UoM
+                    pass
+
+            price_type = 'standard_price' if pricelist.type == 'purchase' else 'list_price'
+            # if Public user try to access standard price from website sale, need to call _price_get.
+            price = product_obj._price_get(cr, uid, [product], price_type, context=context)[product.id] or False
             for rule in items:
-                if 'uom' in context and product.uom_id and context['uom'] != product.uom_id.id:
-                    try:
-                        qty_in_product_uom = product_uom_obj._compute_qty(cr, uid, context['uom'], qty, product.uom_id.id, dict(context.items() + [('raise-exception', False)]))
-                    except except_orm:
-                        qty_in_product_uom = qty
-                else:
-                    qty_in_product_uom = qty
-                if rule.min_quantity and qty_in_product_uom<rule.min_quantity:
+                if rule.min_quantity and qty_in_product_uom < rule.min_quantity:
                     continue
                 if is_product_template:
                     if rule.product_tmpl_id and product.id != rule.product_tmpl_id.id:
@@ -272,79 +282,66 @@ class product_pricelist(osv.osv):
                     if rule.product_id and product.id != rule.product_id.id:
                         continue
 
-                if rule.categ_id:
-                    cat = product.categ_id
-                    while cat:
-                        if cat.id == rule.categ_id.id:
-                            break
-                        cat = cat.parent_id
-                    if not cat:
-                        continue
-
                 if rule.base == -1:
                     if rule.base_pricelist_id:
                         price_tmp = self._price_get_multi(cr, uid,
                                 rule.base_pricelist_id, [(product,
-                                qty, False)], context=context)[product.id]
+                                qty, partner)], context=context)[product.id]
                         ptype_src = rule.base_pricelist_id.currency_id.id
-                        uom_price_already_computed = True
+                        price_uom_id = qty_uom_id
                         price = currency_obj.compute(cr, uid,
                                 ptype_src, pricelist.currency_id.id,
                                 price_tmp, round=False,
                                 context=context)
-                elif rule.base == -2:
-                    seller = False
-                    for seller_id in product.seller_ids:
-                        if (not partner) or (seller_id.name.id != partner):
-                            continue
-                        seller = seller_id
-                    if not seller and product.seller_ids:
-                        seller = product.seller_ids[0]
-                    if seller:
-                        qty_in_seller_uom = qty
-                        from_uom = context.get('uom') or product.uom_id.id
-                        seller_uom = seller.product_uom and seller.product_uom.id or False
-                        if seller_uom and from_uom and from_uom != seller_uom:
-                            qty_in_seller_uom = product_uom_obj._compute_qty(cr, uid, from_uom, qty, to_uom_id=seller_uom)
-                        else:
-                            uom_price_already_computed = True
-                        for line in seller.pricelist_ids:
-                            if line.min_quantity <= qty_in_seller_uom:
-                                price = line.price
-
                 else:
                     if rule.base not in price_types:
                         price_types[rule.base] = price_type_obj.browse(cr, uid, int(rule.base))
                     price_type = price_types[rule.base]
 
-                    uom_price_already_computed = True
-                    price = currency_obj.compute(cr, uid,
+                    # price_get returns the price in the context UoM, i.e. qty_uom_id
+                    price_uom_id = qty_uom_id
+                    price = currency_obj.compute(
+                            cr, uid,
                             price_type.currency_id.id, pricelist.currency_id.id,
-                            product_obj._price_get(cr, uid, [product],
-                            price_type.field, context=context)[product.id], round=False, context=context)
+                            product_obj._price_get(cr, uid, [product], price_type.field, context=context)[product.id],
+                            round=False, context=context)
+                    for seller in product.seller_ids:
+                        partner = partner.id if partner and not isinstance(partner, int) else partner
+                        if seller.name.id == partner:
+                            qty_in_seller = qty
+                            seller_uom = seller.product_uom and seller.product_uom.id or False
+                            if qty_uom_id != seller_uom:
+                                qty_in_seller = product_uom_obj._compute_qty(cr, uid, qty_uom_id, qty, to_uom_id=seller_uom)
+                            for line in seller.pricelist_ids:
+                                if line.min_quantity <= qty_in_seller:
+                                    price = line.price
 
                 if price is not False:
                     price_limit = price
                     price = price * (1.0+(rule.price_discount or 0.0))
                     if rule.price_round:
                         price = tools.float_round(price, precision_rounding=rule.price_round)
-                    if context.get('uom'):
-                        # compute price_surcharge based on reference uom
-                        factor = product_uom_obj.browse(cr, uid, context.get('uom'), context=context).factor
-                    else:
-                        factor = 1.0
-                    price += (rule.price_surcharge or 0.0) / factor
+
+                    convert_to_price_uom = (lambda price: product_uom_obj._compute_price(
+                                                cr, uid, product.uom_id.id,
+                                                price, price_uom_id))
+                    if rule.price_surcharge:
+                        price_surcharge = convert_to_price_uom(rule.price_surcharge)
+                        price += price_surcharge
+
                     if rule.price_min_margin:
-                        price = max(price, price_limit+rule.price_min_margin)
+                        price_min_margin = convert_to_price_uom(rule.price_min_margin)
+                        price = max(price, price_limit + price_min_margin)
+
                     if rule.price_max_margin:
-                        price = min(price, price_limit+rule.price_max_margin)
+                        price_max_margin = convert_to_price_uom(rule.price_max_margin)
+                        price = min(price, price_limit + price_max_margin)
+
                     rule_id = rule.id
                 break
 
-            if price:
-                if 'uom' in context and not uom_price_already_computed:
-                    uom = product.uos_id or product.uom_id
-                    price = product_uom_obj._compute_price(cr, uid, uom.id, price, context['uom'])
+            # Final price conversion to target UoM
+            price = product_uom_obj._compute_price(cr, uid, price_uom_id, price, qty_uom_id)
 
             results[product.id] = (price, rule_id)
         return results
@@ -369,7 +366,7 @@ class product_pricelist_version(osv.osv):
         'active': fields.boolean('Active',
             help="When a version is duplicated it is set to non active, so that the " \
             "dates do not overlaps with original version. You should change the dates " \
-            "and reactivate the pricelist", copy=False),
+            "and reactivate the pricelist"),
         'items_id': fields.one2many('product.pricelist.item',
             'price_version_id', 'Price List Items', required=True, copy=True),
         'date_start': fields.date('Start Date', help="First valid date for the version."),
@@ -408,6 +405,13 @@ class product_pricelist_version(osv.osv):
             ['date_start', 'date_end'])
     ]
 
+    def copy(self, cr, uid, id, default=None, context=None):
+        # set active False to prevent overlapping active pricelist
+        # versions
+        if not default:
+            default = {}
+        default['active'] = False
+        return super(product_pricelist_version, self).copy(cr, uid, id, default, context=context)
 
 class product_pricelist_item(osv.osv):
     def _price_field_get(self, cr, uid, context=None):
@@ -418,7 +422,6 @@ class product_pricelist_item(osv.osv):
             result.append((line.id, line.name))
 
         result.append((-1, _('Other Pricelist')))
-        result.append((-2, _('Supplier Prices on the product form')))
         return result
 
 # Added default function to fetch the Price type Based on Pricelist type.
@@ -473,7 +476,9 @@ class product_pricelist_item(osv.osv):
               "Expressed in the default UoM of the product."
             ),
         'sequence': fields.integer('Sequence', required=True, help="Gives the order in which the pricelist items will be checked. The evaluation gives highest priority to lowest sequence and stops as soon as a matching item is found."),
-        'base': fields.selection(_price_field_get, 'Based on', required=True, size=-1, help="Base price for computation."),
+        'base': fields.selection(_price_field_get, 'Based on', required=True, 
+                                    size=-1, # here use size=-1 to store the values as integers
+                                    help='Base price for computation. \n Public Price: The base price will be the Sale/public Price. \n Supplier Section on Product or Cost Price : The base price will be the supplier price if it is set, otherwise it will be the cost price. \n Other Pricelist : Computation of the base price based on another Pricelist.'),
         'base_pricelist_id': fields.many2one('product.pricelist', 'Other Pricelist'),
 
         'price_surcharge': fields.float('Price Surcharge',
@@ -505,8 +510,3 @@ class product_pricelist_item(osv.osv):
         if prod[0]['code']:
             return {'value': {'name': prod[0]['code']}}
         return {}
-
-
-
-# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
-

@@ -10,10 +10,12 @@ import simplejson
 import openerp
 import cgi
 
+from openerp import tools, _
 from openerp.http import request
 from openerp.osv import osv, fields
 from openerp.tools.misc import DEFAULT_SERVER_DATETIME_FORMAT
 from openerp.addons.bus.bus import TIMEOUT
+from openerp.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 
@@ -182,7 +184,7 @@ class im_chat_message(osv.Model):
         Messages are sent to a session not to users.
     """
     _name = 'im_chat.message'
-    _order = "id desc"
+    _order = "create_date asc"
     _columns = {
         'create_date': fields.datetime('Create Date', required=True, select=True),
         'from_id': fields.many2one('res.users', 'Author'),
@@ -256,6 +258,7 @@ class im_chat_message(osv.Model):
             # build and escape the new message
             message_content = self._escape_keep_url(message_content)
             message_content = self.pool['im_chat.shortcode'].replace_shortcode(cr, uid, message_content, context=context)
+
             vals = {
                 "from_id": from_uid,
                 "to_id": session.id,
@@ -279,7 +282,7 @@ class im_chat_message(osv.Model):
             domain = [("to_id.uuid", "=", uuid)]
             if last_id:
                 domain.append(("id", "<", last_id));
-            return self.search_read(cr, uid, domain, ['id', 'create_date','to_id','from_id', 'type', 'message'], limit=limit, context=context)
+            return self.search_read(cr, uid, domain, ['id', 'create_date','to_id','from_id', 'type', 'message'], limit=limit, order="id desc", context=context)
         return False
 
 
@@ -292,6 +295,26 @@ class im_chat_shortcode(osv.Model):
         'substitution' : fields.char('Substitution', required=True, select=True, help="The html code replacing the shortcut"),
         'description' : fields.char('Description'),
     }
+
+    def _sanitize_shorcode(self, substitution):
+        """ Sanitize the shortcode substitution :
+                 - HTML substitution : only allow the img tag (smiley)
+                 - escape other substitutions to avoid XSS
+        """
+        is_img_tag = re.match(r'''^<img\s+src=('|")([^'"]*)\1\s*/?>$''', substitution, re.M|re.I)
+        if is_img_tag:
+            return substitution
+        return cgi.escape(substitution)
+
+    def create(self, cr, uid, values, context=None):
+        if values.get('substitution'):
+            values['substitution'] = self._sanitize_shorcode(values['substitution'])
+        return super(im_chat_shortcode, self).create(cr, uid, values, context=context)
+
+    def write(self, cr, uid, ids, values, context=None):
+        if values.get('substitution'):
+            values['substitution'] = self._sanitize_shorcode(values['substitution'])
+        return super(im_chat_shortcode, self).write(cr, uid, ids, values, context=context)
 
     def replace_shortcode(self, cr, uid, message, context=None):
         ids = self.search(cr, uid, [], context=context)
@@ -347,7 +370,9 @@ class im_chat_presence(osv.Model):
             # write only if the last_poll is passed TIMEOUT, or if the status has changed
             delta = datetime.datetime.now() - datetime.datetime.strptime(presences[0].last_poll, DEFAULT_SERVER_DATETIME_FORMAT)
             if (delta > datetime.timedelta(seconds=TIMEOUT) or send_notification):
-                self.write(cr, uid, presence_ids, vals, context=context)
+                # Hide transaction serialization errors, which can be ignored, the presence update is not essential
+                with tools.mute_logger('openerp.sql_db'):
+                    self.write(cr, uid, presence_ids, vals, context=context)
         # avoid TransactionRollbackError
         cr.commit()
         # notify if the status has changed
@@ -485,5 +510,3 @@ class Controller(openerp.addons.bus.bus.Controller):
     def history(self, uuid, last_id=False, limit=20):
         registry, cr, uid, context = request.registry, request.cr, request.session.uid or openerp.SUPERUSER_ID, request.context
         return registry["im_chat.message"].get_messages(cr, uid, uuid, last_id, limit, context=context)
-
-# vim:et:

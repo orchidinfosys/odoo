@@ -1,3 +1,7 @@
+odoo.define('survey.survey', function (require) {
+'use strict';
+
+var website = require('website.website');
 /*
  *    OpenERP, Open Source Management Solution
  *    Copyright (C) 2004-TODAY OpenERP S.A. <http://www.openerp.com>
@@ -21,13 +25,10 @@
  * the website engine.
  */
 
-(function () {
-'use strict';
-openerp.website.if_dom_contains('.js_surveyform', function (the_form) {
+website.if_dom_contains('.js_surveyform', function (the_form) {
     console.debug("[survey] Custom JS for survey is loading...");
 
     var prefill_controller = the_form.attr("data-prefill");
-    var validate_controller = the_form.attr("data-validate");
     var submit_controller = the_form.attr("data-submit");
     var scores_controller = the_form.attr("data-scores");
     var print_mode = false;
@@ -35,14 +36,27 @@ openerp.website.if_dom_contains('.js_surveyform', function (the_form) {
 
     // Printing mode: will disable all the controls in the form
     if (_.isUndefined(submit_controller)) {
+        $(".js_surveyform .input-group-addon span.fa-calendar").css("pointer-events", "none");
         $('.js_surveyform :input').prop('disabled', true);
         print_mode = true;
     }
 
-    // Quizz correction mode
+    // Quiz correction mode
     if (! _.isUndefined(scores_controller)) {
         quiz_correction_mode = true;
     }
+
+    $("div.input-group span.fa-calendar").on('click', function(e) {
+        $(e.currentTarget).closest("div.date").datetimepicker({
+            useSeconds: true,
+            icons : {
+                time: 'fa fa-clock-o',
+                date: 'fa fa-calendar',
+                up: 'fa fa-chevron-up',
+                down: 'fa fa-chevron-down'
+            },
+        });
+    });
 
     // Custom code for right behavior of radio buttons with comments box
     $('.js_comments>input[type="text"]').focusin(function(){
@@ -79,33 +93,48 @@ openerp.website.if_dom_contains('.js_surveyform', function (the_form) {
 
     // Pre-filling of the form with previous answers
     function prefill(){
-        var prefill_def = $.ajax(prefill_controller, {dataType: "json"})
-            .done(function(json_data){
-                _.each(json_data, function(value, key){
-                    the_form.find(".form-control[name=" + key + "]").val(value);
-                    the_form.find("input[name^=" + key + "]").each(function(){
-                        $(this).val(value);
+        if (! _.isUndefined(prefill_controller)) {
+            var prefill_def = $.ajax(prefill_controller, {dataType: "json"})
+                .done(function(json_data){
+                    _.each(json_data, function(value, key){
+
+                        // prefill of text/number/date boxes
+                        var input = the_form.find(".form-control[name=" + key + "]");
+                        input.val(value);
+
+                        // special case for comments under multiple suggestions questions
+                        if (_.string.endsWith(key, "_comment") &&
+                            (input.parent().hasClass("js_comments") || input.parent().hasClass("js_ck_comments"))) {
+                            input.siblings().find('>input').attr("checked","checked");
+                        }
+
+                        // checkboxes and radios
+                        the_form.find("input[name^=" + key + "][type!='text']").each(function(){
+                            $(this).val(value);
+                        });
                     });
+                })
+                .fail(function(){
+                    console.warn("[survey] Unable to load prefill data");
                 });
-            })
-            .fail(function(){
-                console.warn("[survey] Unable to load prefill data");
-            });
-        return prefill_def;
+            return prefill_def;
+        }
     }
 
     // Display score if quiz correction mode
     function display_scores(){
-        var score_def = $.ajax(scores_controller, {dataType: "json"})
-            .done(function(json_data){
-                _.each(json_data, function(value, key){
-                    the_form.find("span[data-score-question=" + key + "]").text("Your score: " + value);
+        if (! _.isUndefined(scores_controller)) {
+            var score_def = $.ajax(scores_controller, {dataType: "json"})
+                .done(function(json_data){
+                    _.each(json_data, function(value, key){
+                        the_form.find("span[data-score-question=" + key + "]").text("Your score: " + value);
+                    });
+                })
+                .fail(function(){
+                    console.warn("[survey] Unable to load score data");
                 });
-            })
-            .fail(function(){
-                console.warn("[survey] Unable to load score data");
-            });
-        return score_def;
+            return score_def;
+        }
     }
 
     // Parameters for form submission
@@ -152,4 +181,5 @@ openerp.website.if_dom_contains('.js_surveyform', function (the_form) {
 
     console.debug("[survey] Custom JS for survey loaded!");
 });
-})();
+
+});

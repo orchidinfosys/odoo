@@ -12,23 +12,11 @@
         </template>
 
         <template id="share_page_menu" inherit_id="website.user_navbar">
-            <xpath expr="//li[@groups='base.group_website_designer']" position="replace">
-                <li groups="base.group_website_designer">
-                    <a id="promote-menu-button" class="dropdown-toggle" data-toggle="dropdown" href="#">
-                        Promote <span class="caret"></span>
+            <xpath expr="//li[@groups='base.group_website_designer']//ul" position="inside">
+                <li>
+                    <a href="/r" id="o_website_links_share_page">
+                        <span title="Track this page to count clicks">Share this Page</span>
                     </a>
-                    <ul class="dropdown-menu oe_content_menu" role="menu">
-                        <li>
-                            <a data-action="promote-current-page" href="#">
-                                <span title="Promote page on the web">Optimise SEO...</span>
-                            </a>
-                        </li>
-                        <li>
-                            <a href="/r" id="o_website_links_share_page">
-                                <span title="Track this page to count clicks">Share this Page</span>
-                            </a>
-                        </li>
-                    </ul>
                 </li>
             </xpath>
         </template>
@@ -57,27 +45,29 @@
                                     </div>
                                 </div>
 
-                                <div class="form-group">
-                                    <label class="col-sm-3 control-label">Campaign <i class="fa fa-info-circle" data-toggle="tooltip" data-placement="top" title="Defines the context of your link. It might be an event you want to promote or a special promotion."></i></label>
+                                <div class="o_website_links_utm_forms">
+                                    <div class="form-group">
+                                        <label class="col-sm-3 control-label">Campaign <i class="fa fa-info-circle" data-toggle="tooltip" data-placement="top" title="Defines the context of your link. It might be an event you want to promote or a special promotion."></i></label>
 
-                                    <div class="col-sm-9">
-                                        <input type="hidden" class="form-control" id="campaign-select"/>
+                                        <div class="col-sm-9">
+                                            <input type="hidden" class="form-control" id="campaign-select"/>
+                                        </div>
                                     </div>
-                                </div>
 
-                                <div class="form-group">
-                                    <label class="col-sm-3 control-label">Medium <i class="fa fa-info-circle" data-toggle="tooltip" data-placement="top" title="Defines the medium used to share your link. It might be an email, or a Facebook Ads for instance."></i></label>
+                                    <div class="form-group">
+                                        <label class="col-sm-3 control-label">Medium <i class="fa fa-info-circle" data-toggle="tooltip" data-placement="top" title="Defines the medium used to share your link. It might be an email, or a Facebook Ads for instance."></i></label>
 
-                                    <div class="col-sm-9">
-                                        <input type="hidden" class="form-control" id="channel-select" />
+                                        <div class="col-sm-9">
+                                            <input type="hidden" class="form-control" id="channel-select" />
+                                        </div>
                                     </div>
-                                </div>
 
-                                <div class="form-group">
-                                    <label class="col-sm-3 control-label">Source <i class="fa fa-info-circle" data-toggle="tooltip" data-placement="top" title="Defines the source from which your traffic will come from, Facebook or Twitter for instance."></i></label>
+                                    <div class="form-group">
+                                        <label class="col-sm-3 control-label">Source <i class="fa fa-info-circle" data-toggle="tooltip" data-placement="top" title="Defines the source from which your traffic will come from, Facebook or Twitter for instance."></i></label>
 
-                                    <div class="col-sm-9">
-                                        <input type="hidden" class="form-control" id="source-select" />
+                                        <div class="col-sm-9">
+                                            <input type="hidden" class="form-control" id="source-select" />
+                                        </div>
                                     </div>
                                 </div>
 

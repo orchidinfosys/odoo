@@ -55,22 +55,24 @@ class website_event(website_event):
     def registration_confirm(self, event, **post):
         cr, uid, context = request.cr, request.uid, request.context
         order = request.website.sale_get_order(force_create=1)
+        attendee_ids = set()
 
         registrations = self._process_registration_details(post)
-        registration_ctx = dict(context, registration_force_draft=True)
         for registration in registrations:
             ticket = request.registry['event.event.ticket'].browse(cr, SUPERUSER_ID, int(registration['ticket_id']), context=context)
-            order.with_context(event_ticket_id=ticket.id)._cart_update(product_id=ticket.product_id.id, add_qty=1)
+            cart_values = order.with_context(event_ticket_id=ticket.id)._cart_update(product_id=ticket.product_id.id, add_qty=1, registration_data=[registration])
+            attendee_ids &= set(cart_values.get('attendees', []))
 
-            request.registry['event.registration'].create(cr, SUPERUSER_ID, {
-                'name': registration.get('name'),
-                'phone': registration.get('phone'),
-                'email': registration.get('email'),
-                'event_ticket_id': int(registration['ticket_id']),
-                'partner_id': order.partner_id.id,
-                'event_id': event.id,
-                'origin': order.name,
-            }, context=registration_ctx)
+        # free tickets -> order with amount = 0: auto-confirm, no checkout
+        if not order.amount_total:
+            order.action_button_confirm()  # tde notsure: email sending ?
+            attendees = request.registry['event.registration'].browse(cr, uid, list(attendee_ids), context=context)
+            # clean context and session, then redirect to the confirmation page
+            request.website.sale_reset(context=context)
+            return request.website.render("website_event.registration_complete", {
+                'attendees': attendees,
+                'event': event,
+            })
 
         return request.redirect("/shop/checkout")
 

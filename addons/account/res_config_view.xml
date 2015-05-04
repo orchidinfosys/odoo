@@ -32,7 +32,7 @@
                             <div attrs="{'invisible': [('has_default_company', '=', True)]}">
                                 <label for="company_id" string="Select Company"/>
                                 <field name="company_id"
-                                    widget="selection"
+                                    options="{'no_create': True}"
                                     on_change="onchange_company_id(company_id, context)"
                                     class="oe_inline"/>
                             </div>
@@ -93,7 +93,8 @@
                                 <label for="date_start" string="Date Range"/>
                                 <field name="date_start"
                                     on_change="onchange_start_date(date_start)"
-                                    class="oe_inline"/> -
+                                    class="oe_inline"
+                                    help="The fiscal year is created when installing a Chart of Account."/> -
                                 <field name="date_stop" class="oe_inline"/>
                             </div>
                             <div>

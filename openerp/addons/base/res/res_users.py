@@ -34,8 +34,12 @@ import openerp.exceptions
 from openerp.osv import fields, osv, expression
 from openerp.tools.translate import _
 from openerp.http import request
+from openerp.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
+
+# Only users who can modify the user (incl. the user herself) see the real contents of these fields
+USER_PRIVATE_FIELDS = ['password']
 
 #----------------------------------------------------------
 # Basic res.groups and res.users
@@ -123,8 +127,7 @@ class res_groups(osv.osv):
     def write(self, cr, uid, ids, vals, context=None):
         if 'name' in vals:
             if vals['name'].startswith('-'):
-                raise osv.except_osv(_('Error'),
-                        _('The name of the group can not start with "-"'))
+                raise UserError(_('The name of the group can not start with "-"'))
         res = super(res_groups, self).write(cr, uid, ids, vals, context=context)
         self.pool['ir.model.access'].call_cache_clearing_methods(cr)
         self.pool['res.users'].has_group.clear_cache(self.pool['res.users'])
@@ -155,7 +158,7 @@ class res_users(osv.osv):
             # To change their own password users must use the client-specific change password wizard,
             # so that the new password is immediately used for further RPC requests, otherwise the user
             # will face unexpected 'Access Denied' exceptions.
-            raise osv.except_osv(_('Operation Canceled'), _('Please use the change password wizard (in User Preferences or User menu) to change your own password.'))
+            raise UserError(_('Please use the change password wizard (in User Preferences or User menu) to change your own password.'))
         self.write(cr, uid, id, {'password': value})
 
     def _get_password(self, cr, uid, ids, arg, karg, context=None):
@@ -280,8 +283,10 @@ class res_users(osv.osv):
 
     def read(self, cr, uid, ids, fields=None, context=None, load='_classic_read'):
         def override_password(o):
-            if 'password' in o and ('id' not in o or o['id'] != uid):
-                o['password'] = '********'
+            if ('id' not in o or o['id'] != uid):
+                for f in USER_PRIVATE_FIELDS:
+                    if f in o:
+                        o[f] = '********'
             return o
 
         if fields and (ids == [uid] or ids == uid):
@@ -338,13 +343,13 @@ class res_users(osv.osv):
             for id in ids:
                 if id in self._uid_cache[db]:
                     del self._uid_cache[db][id]
-        self.context_get.clear_cache(self)
+        self._context_get.clear_cache(self)
         self.has_group.clear_cache(self)
         return res
 
     def unlink(self, cr, uid, ids, context=None):
         if 1 in ids:
-            raise osv.except_osv(_('Can not remove root user!'), _('You can not remove the admin user as it is used internally for resources created by Odoo (updates, module installation, ...)'))
+            raise UserError(_('You can not remove the admin user as it is used internally for resources created by Odoo (updates, module installation, ...)'))
         db = cr.dbname
         if db in self._uid_cache:
             for id in ids:
@@ -374,8 +379,8 @@ class res_users(osv.osv):
         return super(res_users, self).copy(cr, uid, id, default, context)
 
     @tools.ormcache(skiparg=2)
-    def context_get(self, cr, uid, context=None):
-        user = self.browse(cr, SUPERUSER_ID, uid, context)
+    def _context_get(self, cr, uid):
+        user = self.browse(cr, SUPERUSER_ID, uid)
         result = {}
         for k in self._fields:
             if k.startswith('context_'):
@@ -390,6 +395,9 @@ class res_users(osv.osv):
                     res = res.id
                 result[context_key] = res or False
         return result
+
+    def context_get(self, cr, uid, context=None):
+        return self._context_get(cr, uid)
 
     def action_get(self, cr, uid, context=None):
         dataobj = self.pool['ir.model.data']
@@ -509,7 +517,7 @@ class res_users(osv.osv):
         self.check(cr.dbname, uid, old_passwd)
         if new_passwd:
             return self.write(cr, uid, uid, {'password': new_passwd})
-        raise osv.except_osv(_('Warning!'), _("Setting empty passwords is not allowed for security reasons!"))
+        raise UserError(_("Setting empty passwords is not allowed for security reasons!"))
 
     def preference_save(self, cr, uid, ids, context=None):
         return {
@@ -540,6 +548,9 @@ class res_users(osv.osv):
                         (SELECT res_id FROM ir_model_data WHERE module=%s AND name=%s)""",
                    (uid, module, ext_id))
         return bool(cr.fetchone())
+
+    def get_company_currency_id(self, cr, uid, context=None):
+        return self.browse(cr, uid, uid, context=context).company_id.currency_id.id
 
 #----------------------------------------------------------
 # Implied groups
@@ -712,16 +723,22 @@ class groups_view(osv.osv):
     def create(self, cr, uid, values, context=None):
         res = super(groups_view, self).create(cr, uid, values, context)
         self.update_user_groups_view(cr, uid, context)
+        # ir_values.get_actions() depends on action records
+        self.pool['ir.values'].clear_caches()
         return res
 
     def write(self, cr, uid, ids, values, context=None):
         res = super(groups_view, self).write(cr, uid, ids, values, context)
         self.update_user_groups_view(cr, uid, context)
+        # ir_values.get_actions() depends on action records
+        self.pool['ir.values'].clear_caches()
         return res
 
     def unlink(self, cr, uid, ids, context=None):
         res = super(groups_view, self).unlink(cr, uid, ids, context)
         self.update_user_groups_view(cr, uid, context)
+        # ir_values.get_actions() depends on action records
+        self.pool['ir.values'].clear_caches()
         return res
 
     def update_user_groups_view(self, cr, uid, context=None):
@@ -729,6 +746,10 @@ class groups_view(osv.osv):
         # and introduces the reified group fields
         # we have to try-catch this, because at first init the view does not exist
         # but we are already creating some basic groups
+        if not context or context.get('install_mode'):
+            # use installation/admin language for translatable names in the view
+            context = dict(context or {})
+            context.update(self.pool['res.users'].context_get(cr, uid))
         view = self.pool['ir.model.data'].xmlid_to_object(cr, SUPERUSER_ID, 'base.user_groups_view', context=context)
         if view and view.exists() and view._name == 'ir.ui.view':
             xml1, xml2 = [], []
@@ -843,7 +864,7 @@ class users_view(osv.osv):
             for group_xml_id in context["default_groups_ref"]:
                 group_split = group_xml_id.split('.')
                 if len(group_split) != 2:
-                    raise osv.except_osv(_('Invalid context value'), _('Invalid context default_groups_ref value (model.name_id) : "%s"') % group_xml_id)
+                    raise UserError(_('Invalid context default_groups_ref value (model.name_id) : "%s"') % group_xml_id)
                 try:
                     temp, group_id = ir_model_data.get_object_reference(cr, uid, group_split[0], group_split[1])
                 except ValueError:
@@ -886,9 +907,11 @@ class users_view(osv.osv):
                 selected = [gid for gid in get_selection_groups(f) if gid in gids]
                 values[f] = selected and selected[-1] or False
 
-    def fields_get(self, cr, uid, allfields=None, context=None, write_access=True):
-        res = super(users_view, self).fields_get(cr, uid, allfields, context, write_access)
+    def fields_get(self, cr, uid, allfields=None, context=None, write_access=True, attributes=None):
+        res = super(users_view, self).fields_get(cr, uid, allfields, context, write_access, attributes)
         # add reified groups fields
+        if uid != SUPERUSER_ID and not self.pool['res.users'].has_group(cr, uid, 'base.group_erp_manager'):
+            return res
         for app, kind, gs in self.pool['res.groups'].get_groups_by_application(cr, uid, context):
             if kind == 'selection':
                 # selection group field
@@ -979,6 +1002,3 @@ class change_password_user(osv.TransientModel):
             line.user_id.write({'password': line.new_passwd})
         # don't keep temporary passwords in the database longer than necessary
         self.write(cr, uid, ids, {'new_passwd': False}, context=context)
-
-
-# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:

@@ -26,6 +26,7 @@ from dateutil.relativedelta import relativedelta
 from openerp.osv import fields, osv
 import openerp.addons.decimal_precision as dp
 from openerp.tools.translate import _
+from openerp.exceptions import UserError
 
 class account_asset_category(osv.osv):
     _name = 'account.asset.category'
@@ -78,7 +79,7 @@ class account_asset_asset(osv.osv):
     def unlink(self, cr, uid, ids, context=None):
         for asset in self.browse(cr, uid, ids, context=context):
             if asset.account_move_line_ids: 
-                raise osv.except_osv(_('Error!'), _('You cannot delete an asset that contains posted depreciation lines.'))
+                raise UserError(_('You cannot delete an asset that contains posted depreciation lines.'))
         return super(account_asset_asset, self).unlink(cr, uid, ids, context=context)
 
     def _get_period(self, cr, uid, context=None):
@@ -170,10 +171,6 @@ class account_asset_asset(osv.osv):
             for x in range(len(posted_depreciation_line_ids), undone_dotation_number):
                 i = x + 1
                 amount = self._compute_board_amount(cr, uid, asset, i, residual_amount, amount_to_depr, undone_dotation_number, posted_depreciation_line_ids, total_days, depreciation_date, context=context)
-                company_currency = asset.company_id.currency_id.id
-                current_currency = asset.currency_id.id
-                # compute amount into company currency
-                amount = currency_obj.compute(cr, uid, current_currency, company_currency, amount, context=context)
                 residual_amount -= amount
                 vals = {
                      'amount': amount,
@@ -214,7 +211,10 @@ class account_asset_asset(osv.osv):
                 l.asset_id IN %s GROUP BY l.asset_id """, (tuple(ids),))
         res=dict(cr.fetchall())
         for asset in self.browse(cr, uid, ids, context):
-            res[asset.id] = asset.purchase_value - res.get(asset.id, 0.0) - asset.salvage_value
+            company_currency = asset.company_id.currency_id.id
+            current_currency = asset.currency_id.id
+            amount = self.pool['res.currency'].compute(cr, uid, company_currency, current_currency, res.get(asset.id, 0.0), context=context)
+            res[asset.id] = asset.purchase_value - amount - asset.salvage_value
         for id in ids:
             res.setdefault(id, 0.0)
         return res
@@ -477,6 +477,3 @@ class account_asset_history(osv.osv):
         'date': lambda *args: time.strftime('%Y-%m-%d'),
         'user_id': lambda self, cr, uid, ctx: uid
     }
-
-
-# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:

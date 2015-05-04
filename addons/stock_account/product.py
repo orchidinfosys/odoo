@@ -22,6 +22,7 @@
 from openerp.osv import fields, osv
 from openerp.tools.translate import _
 from openerp.fields import Many2one
+from openerp.exceptions import UserError
 
 
 
@@ -31,12 +32,12 @@ class product_template(osv.osv):
 
     _columns = {
         'valuation': fields.property(type='selection', selection=[('manual_periodic', 'Periodical (manual)'),
-                                        ('real_time', 'Real Time (automated)')], string='Inventory Valuation',
-                                        help="If real-time valuation is enabled for a product, the system will automatically write journal entries corresponding to stock moves, with product price as specified by the 'Costing Method'" \
+                                        ('real_time', 'Perpetual (automated)')], string='Inventory Valuation',
+                                        help="If perpetual valuation is enabled for a product, the system will automatically create journal entries corresponding to stock moves, with product price as specified by the 'Costing Method'" \
                                              "The inventory variation account set on the product category will represent the current inventory value, and the stock input and stock output account will hold the counterpart moves for incoming and outgoing products."
                                         , required=True, copy=True),
         'cost_method': fields.property(type='selection', selection=[('standard', 'Standard Price'), ('average', 'Average Price'), ('real', 'Real Price')],
-            help="""Standard Price: The cost price is manually updated at the end of a specific period (usually every year).
+            help="""Standard Price: The cost price is manually updated at the end of a specific period (usually once a year).
                     Average Price: The cost price is recomputed at each incoming shipment and used for the product valuation.
                     Real Price: The cost price displayed is the price of the last outgoing product (will be use in case of inventory loss for example).""",
             string="Costing Method", required=True, copy=True),
@@ -80,7 +81,7 @@ class product_template(osv.osv):
         account_valuation = product_obj.categ_id.property_stock_valuation_account_id and product_obj.categ_id.property_stock_valuation_account_id.id or False
 
         if not all([stock_input_acc, stock_output_acc, account_valuation, journal_id]):
-            raise osv.except_osv(_('Error!'), _('''One of the following information is missing on the product or product category and prevents the accounting valuation entries to be created:
+            raise UserError(_('''One of the following information is missing on the product or product category and prevents the accounting valuation entries to be created:
     Product: %s
     Stock Input Account: %s
     Stock Output Account: %s
@@ -113,7 +114,7 @@ class product_template(osv.osv):
 
                 diff = product.standard_price - new_price
                 if not diff:
-                    raise osv.except_osv(_('Error!'), _("No difference between standard price and new price!"))
+                    raise UserError(_("No difference between standard price and new price!"))
                 for prod_variant in product.product_variant_ids:
                     qty = prod_variant.qty_available
                     if qty:
@@ -182,4 +183,3 @@ class product_category(osv.osv):
             string="Stock Valuation Account",
             help="When real-time inventory valuation is enabled on a product, this account will hold the current value of the products.",),
     }
-

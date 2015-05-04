@@ -13,3 +13,12 @@ class res_users(osv.osv):
         'pos_config' : fields.many2one('pos.config', 'Default Point of Sale', domain=[('state', '=', 'active')]),
     }
 
+    def _check_pin(self, cr, uid, ids, context=None):
+        for user in self.browse(cr, uid, ids, context=context):
+            if user.pos_security_pin and not user.pos_security_pin.isdigit():
+                return False
+        return True
+
+    _constraints = [
+        (_check_pin, "Security PIN can only contain digits",['pos_security_pin']),
+    ]

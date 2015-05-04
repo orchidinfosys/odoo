@@ -17,10 +17,15 @@
 ##############################################################################
 
 import code
+import os
 import signal
+import sys
 
 import openerp
 from . import Command
+
+def raise_keyboard_interrupt(*a):
+    raise KeyboardInterrupt()
 
 class Console(code.InteractiveConsole):
     def __init__(self, locals=None, filename="<console>"):
@@ -40,13 +45,22 @@ class Shell(Command):
         openerp.tools.config.parse_config(args)
         openerp.cli.server.report_configuration()
         openerp.service.server.start(preload=[], stop=True)
-        self.locals = {
-            'openerp': openerp
-        }
+        signal.signal(signal.SIGINT, raise_keyboard_interrupt)
+
+    def console(self, local_vars):
+        if not os.isatty(sys.stdin.fileno()):
+            exec sys.stdin in local_vars
+        else:
+            if 'env' not in local_vars:
+                print 'No environment set, use `odoo.py shell -d dbname` to get one.'
+            for i in sorted(local_vars):
+                print '%s: %s' % (i, local_vars[i])
+            Console(locals=local_vars).interact()
 
     def shell(self, dbname):
-        signal.signal(signal.SIGINT, signal.SIG_DFL)
-        # TODO: Fix ctrl-c that doesnt seem to generate KeyboardInterrupt
+        local_vars = {
+            'openerp': openerp
+        }
         with openerp.api.Environment.manage():
             if dbname:
                 registry = openerp.modules.registry.RegistryManager.get(dbname)
@@ -54,18 +68,13 @@ class Shell(Command):
                     uid = openerp.SUPERUSER_ID
                     ctx = openerp.api.Environment(cr, uid, {})['res.users'].context_get()
                     env = openerp.api.Environment(cr, uid, ctx)
-                    self.locals['env'] = env
-                    self.locals['self'] = env.user
-                    print 'Connected to %s,' % dbname
-                    print '  env: Environement(cr, openerp.SUPERUSER_ID, %s).' % ctx
-                    print '  self: %s.' % env.user
-                    Console(locals=self.locals).interact()
+                    local_vars['env'] = env
+                    local_vars['self'] = env.user
+                    self.console(local_vars)
             else:
-                print 'No evironement set, use `odoo.py shell -d dbname` to get one.'
-                Console(locals=self.locals).interact()
+                self.console(local_vars)
 
     def run(self, args):
         self.init(args)
         self.shell(openerp.tools.config['db_name'])
         return 0
-

@@ -51,6 +51,7 @@ class PaymentAcquirer(osv.Model):
     """
     _name = 'payment.acquirer'
     _description = 'Payment Acquirer'
+    _order = 'sequence'
 
     def _get_providers(self, cr, uid, context=None):
         return []
@@ -59,10 +60,11 @@ class PaymentAcquirer(osv.Model):
     _provider_selection = lambda self, *args, **kwargs: self._get_providers(*args, **kwargs)
 
     _columns = {
-        'name': fields.char('Name', required=True),
+        'name': fields.char('Name', required=True, translate=True),
         'provider': fields.selection(_provider_selection, string='Provider', required=True),
         'company_id': fields.many2one('res.company', 'Company', required=True),
-        'pre_msg': fields.html('Message', help='Message displayed to explain and help the payment process.'),
+        'pre_msg': fields.html('Message', translate=True,
+            help='Message displayed to explain and help the payment process.'),
         'post_msg': fields.html('Thanks Message', help='Message displayed after having done the payment process.'),
         'validation': fields.selection(
             [('manual', 'Manual'), ('automatic', 'Automatic')],
@@ -80,12 +82,17 @@ class PaymentAcquirer(osv.Model):
              ('at_pay_confirm', 'At payment confirmation'),
              ('at_pay_now', 'At payment')],
             string='Order Confirmation', required=True),
+        'pending_msg': fields.html('Pending Message', translate=True, help='Message displayed, if order is in pending state after having done the payment process.'),
+        'done_msg': fields.html('Done Message', translate=True, help='Message displayed, if order is done successfully after having done the payment process.'),
+        'cancel_msg': fields.html('Cancel Message', translate=True, help='Message displayed, if order is cancel during the payment process.'),
+        'error_msg': fields.html('Error Message', translate=True, help='Message displayed, if error is occur during the payment process.'),
         # Fees
         'fees_active': fields.boolean('Compute fees'),
         'fees_dom_fixed': fields.float('Fixed domestic fees'),
         'fees_dom_var': fields.float('Variable domestic fees (in percents)'),
         'fees_int_fixed': fields.float('Fixed international fees'),
         'fees_int_var': fields.float('Variable international fees (in percents)'),
+        'sequence': fields.integer('Sequence', help="Determine the display order"),
     }
 
     _defaults = {
@@ -94,6 +101,10 @@ class PaymentAcquirer(osv.Model):
         'validation': 'automatic',
         'website_published': True,
         'auto_confirm': 'at_pay_confirm',
+        'pending_msg': '<i>Pending,</i> Your online payment has been successfully processed. But your order is not validated yet.',
+        'done_msg': '<i>Done,</i> Your online payment has been successfully processed. Thank you for your order.',
+        'cancel_msg': '<i>Cancel,</i> Your payment has been cancelled.',
+        'error_msg': '<i>Error,</i> An error occurred. We cannot process your payment for the moment, please try again later.'
     }
 
     def _check_required_if_provider(self, cr, uid, ids, context=None):
@@ -376,8 +387,15 @@ class PaymentTransaction(osv.Model):
                                          help='Reference of the customer in the acquirer database'),
     }
 
-    _sql_constraints = [
-        ('reference_uniq', 'UNIQUE(reference)', 'The payment transaction reference must be unique!'),
+    def _check_reference(self, cr, uid, ids, context=None):
+        transaction = self.browse(cr, uid, ids[0], context=context)
+        if transaction.state not in ['cancel', 'error']:
+            if self.search(cr, uid, [('reference', '=', transaction.reference), ('id', '!=', transaction.id)], context=context, count=True):
+                return False
+        return True
+
+    _constraints = [
+        (_check_reference, 'The payment transaction reference must be unique!', ['reference', 'state']),
     ]
 
     _defaults = {

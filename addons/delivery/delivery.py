@@ -24,12 +24,14 @@ import time
 from openerp.osv import fields,osv
 from openerp.tools.translate import _
 import openerp.addons.decimal_precision as dp
+from openerp.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 
 class delivery_carrier(osv.osv):
     _name = "delivery.carrier"
     _description = "Carrier"
+    _order = 'sequence, id'
 
     def name_get(self, cr, uid, ids, context=None):
         if not len(ids):
@@ -62,9 +64,9 @@ class delivery_carrier(osv.osv):
                   try:
                     price=grid_obj.get_price(cr, uid, carrier_grid, order, time.strftime('%Y-%m-%d'), context)
                     available = True
-                  except osv.except_osv, e:
+                  except UserError, e:
                     # no suitable delivery method found, probably configuration error
-                    _logger.error("Carrier %s: %s\n%s" % (carrier.name, e.name, e.value))
+                    _logger.info("Carrier %s: %s", carrier.name, e.name)
                     price = 0.0
               else:
                   price = 0.0
@@ -75,7 +77,8 @@ class delivery_carrier(osv.osv):
         return res
 
     _columns = {
-        'name': fields.char('Delivery Method', required=True),
+        'name': fields.char('Delivery Method', required=True, translate=True),
+        'sequence': fields.integer('Sequence', help="Determine the display order"),
         'partner_id': fields.many2one('res.partner', 'Transport Company', required=True, help="The partner that is doing the delivery service."),
         'product_id': fields.many2one('product.product', 'Delivery Product', required=True),
         'grids_id': fields.one2many('delivery.grid', 'carrier_id', 'Delivery Grids'),
@@ -93,6 +96,7 @@ class delivery_carrier(osv.osv):
     _defaults = {
         'active': 1,
         'free_if_more_than': False,
+        'sequence': 10,
     }
 
     def grid_get(self, cr, uid, ids, contact_id, context=None):
@@ -127,6 +131,7 @@ class delivery_carrier(osv.osv):
             grid_id = grid_pool.search(cr, uid, [('carrier_id', '=', record.id)], context=context)
             if grid_id and not (record.normal_price or record.free_if_more_than):
                 grid_pool.unlink(cr, uid, grid_id, context=context)
+                grid_id = None
 
             # Check that float, else 0.0 is False
             if not (isinstance(record.normal_price,float) or record.free_if_more_than):
@@ -207,15 +212,18 @@ class delivery_grid(osv.osv):
         weight = 0
         volume = 0
         quantity = 0
+        total_delivery = 0.0
         product_uom_obj = self.pool.get('product.uom')
         for line in order.order_line:
+            if line.is_delivery:
+                total_delivery += line.price_subtotal + self.pool['sale.order']._amount_line_tax(cr, uid, line, context=context)
             if not line.product_id or line.is_delivery:
                 continue
             q = product_uom_obj._compute_qty(cr, uid, line.product_uom.id, line.product_uom_qty, line.product_id.uom_id.id)
             weight += (line.product_id.weight or 0.0) * q
             volume += (line.product_id.volume or 0.0) * q
             quantity += q
-        total = order.amount_total or 0.0
+        total = (order.amount_total or 0.0) - total_delivery
 
         return self.get_price_from_picking(cr, uid, id, total,weight, volume, quantity, context=context)
 
@@ -234,7 +242,7 @@ class delivery_grid(osv.osv):
                 ok = True
                 break
         if not ok:
-            raise osv.except_osv(_("Unable to fetch delivery method!"), _("Selected product in the delivery method doesn't fulfill any of the delivery grid(s) criteria."))
+            raise UserError(_("Selected product in the delivery method doesn't fulfill any of the delivery grid(s) criteria."))
 
         return price
 
@@ -265,6 +273,3 @@ class delivery_grid_line(osv.osv):
         'variable_factor': lambda *args: 'weight',
     }
     _order = 'sequence, list_price'
-
-
-# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:

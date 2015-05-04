@@ -22,6 +22,7 @@
 
 from openerp.osv import fields, osv
 from openerp.tools.translate import _
+from openerp.exceptions import UserError
 
 class hr_timesheet_invoice_create(osv.osv_memory):
 
@@ -33,6 +34,7 @@ class hr_timesheet_invoice_create(osv.osv_memory):
         'name': fields.boolean('Description', help='The detail of each work done will be displayed on the invoice'),
         'price': fields.boolean('Cost', help='The cost of each work done will be displayed on the invoice. You probably don\'t want to check this'),
         'product': fields.many2one('product.product', 'Force Product', help='Fill this field only if you want to force to use a specific product. Keep empty to use the real product that comes from the cost.'),
+        'group_by_partner': fields.boolean('Group by Partner', help='If this box is checked, the system will group invoices by customer.'),
     }
 
     _defaults = {
@@ -50,10 +52,10 @@ class hr_timesheet_invoice_create(osv.osv_memory):
         @param context: A standard dictionary for contextual values
         """
         analytic_obj = self.pool.get('account.analytic.line')
-        data = context and context.get('active_ids', [])
+        data = context and context.get('active_ids', []) or []
         for analytic in analytic_obj.browse(cr, uid, data, context=context):
             if analytic.invoice_id:
-                raise osv.except_osv(_('Warning!'), _("Invoice is already linked to some of the analytic line(s)!"))
+                raise UserError(_("Invoice is already linked to some of the analytic line(s)!"))
 
     def do_create(self, cr, uid, ids, context=None):
         data = self.read(cr, uid, ids, context=context)[0]
@@ -67,8 +69,3 @@ class hr_timesheet_invoice_create(osv.osv_memory):
         act_win['domain'] = [('id','in',invs),('type','=','out_invoice')]
         act_win['name'] = _('Invoices')
         return act_win
-
-
-
-# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
-

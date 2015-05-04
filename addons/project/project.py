@@ -19,11 +19,9 @@
 #
 ##############################################################################
 
-import calendar
 from datetime import datetime, date
 from dateutil import relativedelta
 from lxml import etree
-import json
 import time
 
 from openerp import SUPERUSER_ID
@@ -31,6 +29,7 @@ from openerp import tools
 from openerp.addons.resource.faces import task as Task
 from openerp.osv import fields, osv
 from openerp.tools.translate import _
+from openerp.exceptions import UserError
 
 
 class project_task_type(osv.osv):
@@ -39,12 +38,12 @@ class project_task_type(osv.osv):
     _order = 'sequence'
     _columns = {
         'name': fields.char('Stage Name', required=True, translate=True),
-        'description': fields.text('Description'),
+        'description': fields.text('Description', translate=True),
         'sequence': fields.integer('Sequence'),
         'case_default': fields.boolean('Default for New Projects',
                         help="If you check this field, this stage will be proposed by default on each new project. It will not assign this stage to existing projects."),
         'project_ids': fields.many2many('project.project', 'project_task_type_rel', 'type_id', 'project_id', 'Projects'),
-        'legend_priority': fields.text(
+        'legend_priority': fields.char(
             'Priority Management Explanation', translate=True,
             help='Explanation text to help users using the star and priority mechanism on stages or issues that are in this stage.'),
         'legend_blocked': fields.char(
@@ -185,8 +184,7 @@ class project(osv.osv):
         analytic_account_to_delete = set()
         for proj in self.browse(cr, uid, ids, context=context):
             if proj.tasks:
-                raise osv.except_osv(_('Invalid Action!'),
-                                     _('You cannot delete a project containing tasks. You can either delete all the project\'s tasks and then delete the project or simply deactivate the project.'))
+                raise UserError(_('You cannot delete a project containing tasks. You can either delete all the project\'s tasks and then delete the project or simply deactivate the project.'))
             elif proj.alias_id:
                 alias_ids.append(proj.alias_id.id)
             if proj.analytic_account_id and not proj.analytic_account_id.line_ids:
@@ -208,7 +206,7 @@ class project(osv.osv):
         return res
     def _task_count(self, cr, uid, ids, field_name, arg, context=None):
         res={}
-        for tasks in self.browse(cr, uid, ids, context):
+        for tasks in self.browse(cr, uid, ids, dict(context, active_test=False)):
             res[tasks.id] = len(tasks.task_ids)
         return res
     def _get_alias_models(self, cr, uid, context=None):
@@ -268,17 +266,6 @@ class project(osv.osv):
             month_delta = relativedelta.relativedelta(month_begin, group_begin_date)
             section_result[self._period_number - (month_delta.months + 1)] = {'value': group.get(value_field, 0), 'tooltip': group.get(groupby_field, 0)}
         return section_result
-
-    def _get_project_task_data(self, cr, uid, ids, field_name, arg, context=None):
-        obj = self.pool['project.task']
-        month_begin = date.today().replace(day=1)
-        date_begin = (month_begin - relativedelta.relativedelta(months=self._period_number - 1)).strftime(tools.DEFAULT_SERVER_DATE_FORMAT)
-        date_end = month_begin.replace(day=calendar.monthrange(month_begin.year, month_begin.month)[1]).strftime(tools.DEFAULT_SERVER_DATE_FORMAT)
-        res = {}
-        for id in ids:
-            created_domain = [('project_id', '=', id), ('create_date', '>=', date_begin ), ('create_date', '<=', date_end ), ('stage_id.fold', '=', False)]
-            res[id] = json.dumps(self.__get_bar_values(cr, uid, obj, created_domain, [ 'create_date'], 'create_date_count', 'create_date', context=context))
-        return res
 
     # Lambda indirection method to avoid passing a copy of the overridable method when declaring the field
     _alias_models = lambda self, *args, **kwargs: self._get_alias_models(*args, **kwargs)
@@ -345,8 +332,6 @@ class project(osv.osv):
                                    ('pending','Pending'),
                                    ('close','Closed')],
                                   'Status', required=True, copy=False),
-        'monthly_tasks': fields.function(_get_project_task_data, type='char', readonly=True,
-                                             string='Project Task By Month'),
         'doc_count': fields.function(
             _get_attached_docs, string="Number of documents attached", type='integer'
         )
@@ -385,7 +370,7 @@ class project(osv.osv):
         return True
 
     _constraints = [
-        (_check_dates, 'Error! project start-date must be lower then project end-date.', ['date_start', 'date'])
+        (_check_dates, 'Error! project start-date must be lower than project end-date.', ['date_start', 'date'])
     ]
 
     def set_template(self, cr, uid, ids, context=None):
@@ -504,7 +489,7 @@ class project(osv.osv):
 
         for project in projects:
             if (not project.members) and force_members:
-                raise osv.except_osv(_('Warning!'),_("You must assign members on the project '%s'!") % (project.name,))
+                raise UserError(_("You must assign members on the project '%s'!") % (project.name,))
 
         resource_pool = self.pool.get('resource.resource')
 
@@ -627,22 +612,7 @@ class task(osv.osv):
     _description = "Task"
     _date_name = "date_start"
     _inherit = ['mail.thread', 'ir.needaction_mixin']
-
     _mail_post_access = 'read'
-    _track = {
-        'stage_id': {
-            # this is only an heuristics; depending on your particular stage configuration it may not match all 'new' stages
-            'project.mt_task_new': lambda self, cr, uid, obj, ctx=None: obj.stage_id and obj.stage_id.sequence <= 1,
-            'project.mt_task_stage': lambda self, cr, uid, obj, ctx=None: obj.stage_id.sequence > 1,
-        },
-        'user_id': {
-            'project.mt_task_assigned': lambda self, cr, uid, obj, ctx=None: obj.user_id and obj.user_id.id,
-        },
-        'kanban_state': {
-            'project.mt_task_blocked': lambda self, cr, uid, obj, ctx=None: obj.kanban_state == 'blocked',
-            'project.mt_task_ready': lambda self, cr, uid, obj, ctx=None: obj.kanban_state == 'done',
-        },
-    }
 
     def _get_default_partner(self, cr, uid, context=None):
         project_id = self._get_default_project_id(cr, uid, context)
@@ -737,7 +707,6 @@ class task(osv.osv):
             res[task.id]['progress'] = 0.0
             if (task.remaining_hours + hours.get(task.id, 0.0)):
                 res[task.id]['progress'] = round(min(100.0 * hours.get(task.id, 0.0) / res[task.id]['total_hours'], 99.99),2)
-            # TDE CHECK: if task.state in ('done','cancelled'):
             if task.stage_id and task.stage_id.fold:
                 res[task.id]['progress'] = 100.0
         return res
@@ -810,7 +779,7 @@ class task(osv.osv):
                                               " * Normal is the default situation\n"
                                               " * Blocked indicates something is preventing the progress of this task\n"
                                               " * Ready for next stage indicates the task is ready to be pulled to the next stage",
-                                         required=False, copy=False),
+                                         required=True, copy=False),
         'create_date': fields.datetime('Create Date', readonly=True, select=True),
         'write_date': fields.datetime('Last Modification Date', readonly=True, select=True), #not displayed in the view but it might be useful with base_action_rule module (and it needs to be defined first for that)
         'date_start': fields.datetime('Starting Date', select=True, copy=False),
@@ -912,25 +881,30 @@ class task(osv.osv):
 
     _constraints = [
         (_check_recursion, 'Error ! You cannot create recursive tasks.', ['parent_ids']),
-        (_check_dates, 'Error ! Task end-date must be greater then task start-date', ['date_start','date_end'])
+        (_check_dates, 'Error ! Task starting date must be lower than its ending date.', ['date_start','date_end'])
     ]
 
     # Override view according to the company definition
     def fields_view_get(self, cr, uid, view_id=None, view_type='form', context=None, toolbar=False, submenu=False):
         users_obj = self.pool.get('res.users')
         if context is None: context = {}
-        # read uom as admin to avoid access rights issues, e.g. for portal/share users,
-        # this should be safe (no context passed to avoid side-effects)
-        obj_tm = users_obj.browse(cr, SUPERUSER_ID, uid, context=context).company_id.project_time_mode_id
-        tm = obj_tm and obj_tm.name or 'Hours'
 
         res = super(task, self).fields_view_get(cr, uid, view_id, view_type, context, toolbar, submenu=submenu)
 
-        if tm in ['Hours','Hour']:
+        # read uom as admin to avoid access rights issues, e.g. for portal/share users,
+        # this should be safe (no context passed to avoid side-effects)
+        obj_tm = users_obj.browse(cr, SUPERUSER_ID, uid, context=context).company_id.project_time_mode_id
+        try:
+            # using get_object to get translation value
+            uom_hour = self.pool['ir.model.data'].get_object(cr, uid, 'product', 'product_uom_hour', context=context)
+        except ValueError:
+            uom_hour = False
+        if not obj_tm or not uom_hour or obj_tm.id == uom_hour.id:
             return res
 
         eview = etree.fromstring(res['arch'])
 
+        # if the project_time_mode_id is not in hours (so in days), display it as a float field
         def _check_rec(eview):
             if eview.attrib.get('widget','') == 'float_time':
                 eview.set('widget','float')
@@ -942,9 +916,13 @@ class task(osv.osv):
 
         res['arch'] = etree.tostring(eview)
 
+        # replace reference of 'Hours' to 'Day(s)'
         for f in res['fields']:
+            # TODO this NOT work in different language than english
+            # the field 'Initially Planned Hours' should be replaced by 'Initially Planned Days'
+            # but string 'Initially Planned Days' is not available in translation
             if 'Hours' in res['fields'][f]['string']:
-                res['fields'][f]['string'] = res['fields'][f]['string'].replace('Hours',tm)
+                res['fields'][f]['string'] = res['fields'][f]['string'].replace('Hours', obj_tm.name)
         return res
 
     def get_empty_list_help(self, cr, uid, help, context=None):
@@ -994,7 +972,7 @@ class task(osv.osv):
             if task.child_ids:
                 for child in task.child_ids:
                     if child.stage_id and not child.stage_id.fold:
-                        raise osv.except_osv(_("Warning!"), _("Child task still open.\nPlease cancel or complete child task first."))
+                        raise UserError(_("Child task still open.\nPlease cancel or complete child task first."))
         return True
 
     def _delegate_task_attachments(self, cr, uid, task_id, delegated_task_id, context=None):
@@ -1038,7 +1016,7 @@ class task(osv.osv):
     def set_remaining_time(self, cr, uid, ids, remaining_time=1.0, context=None):
         for task in self.browse(cr, uid, ids, context=context):
             if (task.stage_id and task.stage_id.sequence <= 1) or (task.planned_hours == 0.0):
-                self.write(cr, uid, [task.id], {'planned_hours': remaining_time}, context=context)
+                self.write(cr, uid, [task.id], {'planned_hours': remaining_time + task.effective_hours}, context=context)
         self.write(cr, uid, ids, {'remaining_hours': remaining_time}, context=context)
         return True
 
@@ -1152,11 +1130,25 @@ class task(osv.osv):
     # Mail gateway
     # ---------------------------------------------------
 
-    def message_get_reply_to(self, cr, uid, ids, context=None):
+    def _track_subtype(self, cr, uid, ids, init_values, context=None):
+        record = self.browse(cr, uid, ids[0], context=context)
+        if 'kanban_state' in init_values and record.kanban_state == 'blocked':
+            return 'project.mt_task_blocked'
+        elif 'kanban_state' in init_values and record.kanban_state == 'done':
+            return 'project.mt_task_ready'
+        elif 'user_id' in init_values and record.user_id:  # assigned -> new
+            return 'project.mt_task_new'
+        elif 'stage_id' in init_values and record.stage_id and record.stage_id.sequence <= 1:  # start stage -> new
+            return 'project.mt_task_new'
+        elif 'stage_id' in init_values:
+            return 'project.mt_task_stage'
+        return super(task, self)._track_subtype(cr, uid, ids, init_values, context=context)
+
+    def message_get_reply_to(self, cr, uid, ids, default=None, context=None):
         """ Override to get the reply_to of the parent project. """
         tasks = self.browse(cr, SUPERUSER_ID, ids, context=context)
         project_ids = set([task.project_id.id for task in tasks if task.project_id])
-        aliases = self.pool['project.project'].message_get_reply_to(cr, uid, list(project_ids), context=context)
+        aliases = self.pool['project.project'].message_get_reply_to(cr, uid, list(project_ids), default=default, context=context)
         return dict((task.id, aliases.get(task.project_id and task.project_id.id or 0, False)) for task in tasks)
 
     def message_new(self, cr, uid, msg, custom_values=None, context=None):
@@ -1166,10 +1158,11 @@ class task(osv.osv):
         defaults = {
             'name': msg.get('subject'),
             'planned_hours': 0.0,
+            'partner_id': msg.get('author_id', False)
         }
         defaults.update(custom_values)
         res = super(task, self).message_new(cr, uid, msg, custom_values=defaults, context=context)
-        email_list = tools.email_split(msg.get('to', '') + ',' + msg.get('cc', ''))
+        email_list = tools.email_split((msg.get('to') or '') + ',' + (msg.get('cc') or ''))
         new_task = self.browse(cr, uid, res, context=context)
         if new_task.project_id and new_task.project_id.alias_name:  # check left-part is not already an alias
             email_list = filter(lambda x: x.split('@')[0] != new_task.project_id.alias_name, email_list)
@@ -1245,7 +1238,7 @@ class account_analytic_account(osv.osv):
     _inherit = 'account.analytic.account'
     _description = 'Analytic Account'
     _columns = {
-        'use_tasks': fields.boolean('Tasks', help="If checked, this contract will be available in the project menu and you will be able to manage tasks or track issues"),
+        'use_tasks': fields.boolean('Tasks', help="Check this box to manage internal activities through this project"),
         'company_uom_id': fields.related('company_id', 'project_time_mode_id', string="Company UOM", type='many2one', relation='product.uom'),
     }
 
@@ -1303,7 +1296,7 @@ class account_analytic_account(osv.osv):
         proj_ids = self.pool['project.project'].search(cr, uid, [('analytic_account_id', 'in', ids)])
         has_tasks = self.pool['project.task'].search(cr, uid, [('project_id', 'in', proj_ids)], count=True, context=context)
         if has_tasks:
-            raise osv.except_osv(_('Warning!'), _('Please remove existing tasks in the project linked to the accounts you want to delete.'))
+            raise UserError(_('Please remove existing tasks in the project linked to the accounts you want to delete.'))
         return super(account_analytic_account, self).unlink(cr, uid, ids, context=context)
 
     def name_search(self, cr, uid, name, args=None, operator='ilike', context=None, limit=100):
@@ -1430,4 +1423,3 @@ class project_category(osv.osv):
     _columns = {
         'name': fields.char('Name', required=True, translate=True),
     }
-# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:

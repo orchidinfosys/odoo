@@ -1,7 +1,7 @@
 import unittest2
 
 import openerp.tests.common as common
-from openerp.osv.orm import except_orm
+from openerp.exceptions import ValidationError
 
 class test_base(common.TransactionCase):
 
@@ -36,6 +36,9 @@ class test_base(common.TransactionCase):
         partner_id, dummy = self.res_partner.name_create(cr, uid, email)
         found_id = self.res_partner.find_or_create(cr, uid, email)
         self.assertEqual(partner_id, found_id, 'find_or_create failed')
+        partner_id2, dummy2 = self.res_partner.name_create(cr, uid, 'sarah.john@connor.com')
+        found_id2 = self.res_partner.find_or_create(cr, uid, 'john@connor.com')
+        self.assertNotEqual(partner_id2, found_id2, 'john@connor.com match sarah.john@connor.com')
         new_id = self.res_partner.find_or_create(cr, uid, self.samples[1][0])
         self.assertTrue(new_id > partner_id, 'find_or_create failed - should have created new one')
         new_id2 = self.res_partner.find_or_create(cr, uid, self.samples[2][0])
@@ -398,21 +401,21 @@ class test_partner_recursion(common.TransactionCase):
 
     def test_101_res_partner_recursion(self):
         cr, uid, p1, p3 = self.cr, self.uid, self.p1, self.p3
-        self.assertRaises(except_orm, self.res_partner.write, cr, uid, [p1], {'parent_id': p3})
+        self.assertRaises(ValidationError, self.res_partner.write, cr, uid, [p1], {'parent_id': p3})
 
     def test_102_res_partner_recursion(self):
         cr, uid, p2, p3 = self.cr, self.uid, self.p2, self.p3
-        self.assertRaises(except_orm, self.res_partner.write, cr, uid, [p2], {'parent_id': p3})
+        self.assertRaises(ValidationError, self.res_partner.write, cr, uid, [p2], {'parent_id': p3})
 
     def test_103_res_partner_recursion(self):
         cr, uid, p3 = self.cr, self.uid, self.p3
-        self.assertRaises(except_orm, self.res_partner.write, cr, uid, [p3], {'parent_id': p3})
+        self.assertRaises(ValidationError, self.res_partner.write, cr, uid, [p3], {'parent_id': p3})
 
     def test_104_res_partner_recursion_indirect_cycle(self):
         """ Indirect hacky write to create cycle in children """
         cr, uid, p2, p3 = self.cr, self.uid, self.p2, self.p3
         p3b = self.res_partner.create(cr, uid, {'name': 'Elmtree Grand-Child 1.2', 'parent_id': self.p2})
-        self.assertRaises(except_orm, self.res_partner.write, cr, uid, [p2],
+        self.assertRaises(ValidationError, self.res_partner.write, cr, uid, [p2],
                           {'child_ids': [(1, p3, {'parent_id': p3b}), (1, p3b, {'parent_id': p3})]})
 
     def test_110_res_partner_recursion_multi_update(self):

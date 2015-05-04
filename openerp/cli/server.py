@@ -30,6 +30,7 @@ GNU Public Licence.
 """
 
 import atexit
+import csv
 import logging
 import os
 import signal
@@ -73,11 +74,11 @@ def report_configuration():
     """
     config = openerp.tools.config
     _logger.info("OpenERP version %s", __version__)
-    for name, value in [('addons paths', openerp.modules.module.ad_paths),
-                        ('database hostname', config['db_host'] or 'localhost'),
-                        ('database port', config['db_port'] or '5432'),
-                        ('database user', config['db_user'])]:
-        _logger.info("%s: %s", name, value)
+    _logger.info('addons paths: %s', openerp.modules.module.ad_paths)
+    host = config['db_host'] or os.environ.get('PGHOST', 'default')
+    port = config['db_port'] or os.environ.get('PGPORT', 'default')
+    user = config['db_user'] or os.environ.get('PGUSER', 'default')
+    _logger.info('database: %s@%s:%s', user, host, port)
 
 def rm_pid_file():
     config = openerp.tools.config
@@ -98,7 +99,6 @@ def setup_pid_file():
             pidtext = "%d" % (os.getpid())
             fd.write(pidtext)
         atexit.register(rm_pid_file)
-
 
 def export_translation():
     config = openerp.tools.config
@@ -142,6 +142,17 @@ def main(args):
 
     config = openerp.tools.config
 
+    # the default limit for CSV fields in the module is 128KiB, which is not
+    # quite sufficient to import images to store in attachment. 500MiB is a
+    # bit overkill, but better safe than sorry I guess
+    csv.field_size_limit(500 * 1024 * 1024)
+
+    if config["db_name"]:
+        try:
+            openerp.service.db._create_empty_database(config["db_name"])
+        except openerp.service.db.DatabaseExists:
+            pass
+
     if config["test_file"]:
         config["test_enable"] = True
 
@@ -172,5 +183,3 @@ class Server(Command):
     """Start the odoo server (default command)"""
     def run(self, args):
         main(args)
-
-# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:

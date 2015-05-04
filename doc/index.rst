@@ -11,8 +11,10 @@ Odoo Technical Documentation
     :maxdepth: 2
 
     tutorials
+    setup
     reference
     api_integration
+    business
 
 .. ifconfig:: todo_include_todos
 

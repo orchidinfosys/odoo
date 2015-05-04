@@ -23,16 +23,6 @@ $sheet-padding: 16px
     font-weight: normal
     font-style: normal
 
-@font-face
-    font-family: 'EntypoRegular'
-    src: url('/web/static/src/font/entypo-webfont.eot') format('eot')
-    src: url('/web/static/src/font/entypo-webfont.eot?#iefix') format('embedded-opentype')
-    src: url('/web/static/src/font/entypo-webfont.woff') format('woff')
-    src: url('/web/static/src/font/entypo-webfont.ttf') format('truetype')
-    src: url('/web/static/src/font/entypo-webfont.svg') format('svg') active
-    font-weight: normal
-    font-style: normal
-
 @mixin reset()
     border: none
     padding: 0
@@ -130,17 +120,6 @@ $sheet-padding: 16px
         content: $icon-name
         color: $color
 
-@mixin text-to-entypo-icon($icon-name, $color: #404040, $size: 21px)
-    font-size: 1px
-    letter-spacing: -1px
-    color: transparent
-    text-shadow: none
-    font-weight: normal
-    &:before
-        font: $size "entypoRegular"
-        content: $icon-name
-        color: $color
-
 // }}}
 
 #oe_main_menu_navbar
@@ -153,7 +132,7 @@ $sheet-padding: 16px
         font-size: 13px
     .oe_topbar_avatar
         max-height: 18px
-        width: auto
+        width: 18px
         
 #oe_main_menu_navbar.navbar
     margin-bottom: 0px
@@ -161,7 +140,23 @@ $sheet-padding: 16px
 .oe_systray
     margin-right: 0px !important
 
+.apps-client
+    border: 0
+
 // Notifications {{{
+
+.oe_indicator
+    z-index: 99999
+    position: absolute
+    display: inline-block
+    color: white
+    background: #a4498b
+    padding: 6px 16px
+    border-radius: 4px
+    box-shadow: 0 0 1px black
+    left: 50%
+    transform: translate(-50%, 0)
+
 .oe_notification
     z-index: 1600
     
@@ -183,10 +178,10 @@ $sheet-padding: 16px
     .oe_topbar_name
         max-width: 150px
         display: inline-block
-        height: 15px // Customize to manage caret when topbar_name is over sized.
         text-overflow: ellipsis
         white-space: nowrap
         overflow: hidden // Customize to bring ellipsis when topbar_name is over sized.
+        vertical-align: middle
 // }}}
 
 .openerp
@@ -198,7 +193,7 @@ $sheet-padding: 16px
     font-size: 13px
     background: white
     &.openerp_webclient_container
-        height: 95%
+        height: 95% // fallback for browsers without support for calc()
         height: -webkit-calc(100% - 34px)
         height: calc(100% - 34px)
         display: -ms-flexbox
@@ -206,7 +201,7 @@ $sheet-padding: 16px
         display: flex
     @media (max-width: 768px)
         &.openerp_webclient_container
-            height: 95%
+            height: 95% // fallback for browsers without support for calc()
             height: -webkit-calc(100% - 52px)
             height: calc(100% - 52px)
     // }}}
@@ -333,11 +328,6 @@ $sheet-padding: 16px
         font-family: "mnmliconsRegular" !important
         font-size: 21px
         font-weight: 300 !important
-    .oe_e
-        font-family: "entypoRegular" !important
-        font-size: 34px
-        font-weight: 300 !important
-        line-height: 100%
     .oe_left
         float: left
         margin-right: 8px
@@ -366,12 +356,12 @@ $sheet-padding: 16px
         color: white
         background: #DC5F59
     button.oe_highlight
-        @include vertical-gradient(#df3f3f, #a21a1a)
+        @include vertical-gradient(#729fcf, #3465a4)
         @include box-shadow((0 1px 2px rgba(0, 0, 0, 0.1), 0 1px 1px rgba(155, 155, 155, 0.4) inset))
     button.oe_highlight:hover
-        @include vertical-gradient(lighten(#e04f4f, 2%), lighten(#a21a1a, 2%))
+        @include vertical-gradient(darken(#729fcf, 10%), darken(#3465a4, 10%))
     button.oe_highlight:active
-        @include vertical-gradient(lighten(#a21a1a, 8%), darken(#df3f3f, 8%))
+        @include vertical-gradient(lighten(#729fcf, 4%), lighten(#3465a4, 4%))
     .oe_background_grey
         background: #eee !important
 
@@ -380,11 +370,6 @@ $sheet-padding: 16px
             color: white
             background: #dc5f59
             font-weight: bold
-        button.oe_highlight_on_dirty
-            @include vertical-gradient(#dc5f59, #b33630)
-            @include box-shadow(none)
-            &:hover
-                background: #ED6F6A
     .oe_warning_redirect
         border: none !important
         padding: 0 !important
@@ -435,6 +420,12 @@ $sheet-padding: 16px
         text-align: right
         .oe_stat_button
             display: inline-table
+    button.oe_toggle_button
+        box-shadow: none
+        white-space: nowrap
+        background: transparent
+        outline: none
+        border: none
     .oe_avatar
         > img
             max-height: 90px
@@ -466,7 +457,8 @@ $sheet-padding: 16px
         text-shadow: 0 0 2px black
         vertical-align: top
         position: relative
-        top: -8px
+        top: 4px
+        font-size: 22px
     .oe_star_on:hover, .oe_star_off:hover
         text-decoration: none
     .oe_star_on
@@ -611,10 +603,10 @@ $sheet-padding: 16px
         top: 0
         right: 50%
         padding: 4px 12px
-        background: #A61300
+        background: #a4498b
         color: white
         text-align: center
-        border: 1px solid #900
+        border: 1px solid #92417c
         border-top: none
         -moz-border-radius-bottomright: 8px
         -moz-border-radius-bottomleft: 8px
@@ -804,57 +796,68 @@ $sheet-padding: 16px
         text-decoration: underline
     .oe_application
         height: 100%
-        -webkit-flex-grow: 1
-        flex-grow: 1
-        -ms-flex-negative: 1
-        display: inline-block\9
-        overflow: auto\9
-        width: -webkit-calc(100% - 220px)
-        width: calc(100% - 220px)
+        width: 100%
+        display: -webkit-box
+        display: -moz-box
+        display: -ms-flexbox
+        display: -webkit-flex
+        display: flex
+        -ms-flex-direction: column
+        -webkit-flex-direction: column
+        flex-direction: column        
         .oe_application
             width: 100%
     // }}}
     // ViewManager common {{{
     .oe-view-manager
-        width: 100%
-        height: 100%
-        display: -webkit-flex
-        display: flex
-        -webkit-flex-direction: column
-        flex-direction: column
+        -webkit-box-flex: 1
+        -webkit-flex: 1 1 auto
+        -ms-flex: 1 1 auto
+        flex: 1 1 auto
+        overflow: auto
+        position: relative
         .oe-view-manager-content
-            overflow: auto
-            -webkit-flex-grow: 1
-            flex-grow: 1
-            position: relative
+            position: absolute
+            top: 0
+            bottom: 0
+            right: 0
+            left: 0
             a
                 color: $link-color
             > div
-                position: absolute
-                position: static\9
-                top: 0
-                bottom: 0
-                right: 0
-                left: 0
+                height: 100%
+                position: static
                 display: none
             .oe-view-manager-content
+                position: static
                 > div
-                    position: relative
                     display: block
-        .oe-view-manager-debug
-            margin-right: 5px
-    .oe-view-manager-header
+    .oe-o2m-control-panel
+        width: 100%
+        .oe-cp-buttons
+            div
+                display: inline-block
+                padding: 5px 5px
+        .oe-cp-pager
+            div
+                display: inline-block
+                padding: 5px 5px
+    .oe-control-panel
         background-color: rgb(240, 238, 238)
         border-bottom: 1px solid #afafb6
-        -webkit-flex-shrink: 0
-        flex-shrink: 0
-        width: 100%
-        -webkit-user-select: none
-        -moz-user-select: none
+        -webkit-box-flex: 0
+        -webkit-flex: 0 0 auto
+        -ms-flex: 0 0 auto
+        flex: 0 0 auto
         user-select: none
+        > .container-fluid
+            width: 100%
         .oe-button-column
             height: 30px
         .dropdown-menu
+            max-height: calc(100vh - 125px)
+            overflow: auto
+            overflow-x: hidden
             li
                 position: relative
                 a
@@ -894,30 +897,30 @@ $sheet-padding: 16px
                 -moz-user-select: initial
                 -webkit-user-select: initial
                 user-select: initial
-        .oe-view-manager-search-view
+        .oe-cp-search-view
             padding-top: 5px
-        .oe-view-manager-switch
+        .oe-cp-switch-buttons
             button
                 width: 34px
-            .oe-vm-switch-kanban:before
+            .oe-cp-switch-kanban:before
                 content: "\f009"
-            .oe-vm-switch-list:before
+            .oe-cp-switch-list:before
                 content: ""
-            .oe-vm-switch-form:before
+            .oe-cp-switch-form:before
                 content: "\f044"
-            .oe-vm-switch-graph:before
+            .oe-cp-switch-graph:before
                 content: "\f080"
-            .oe-vm-switch-calendar:before
+            .oe-cp-switch-calendar:before
                 content: "\f073"
-            .oe-vm-switch-gantt:before
+            .oe-cp-switch-gantt:before
                 content: "\f0ae"
-            .oe-vm-switch-pivot:before
+            .oe-cp-switch-pivot:before
                 content: "\f0ce"
-        .oe-view-manager-buttons
+            .oe-cp-switch-tree:before
+                content: "\f036"
+        .oe-cp-buttons
             display: inline-block
-            > div
-                display: none
-        .oe-view-manager-sidebar
+        .oe-cp-sidebar
             display: inline-block
             float: right
             .oe_form_binary_form
@@ -934,7 +937,8 @@ $sheet-padding: 16px
                 display: inline-block
             .oe_sidebar_delete_item
                 padding: 0
-                display: inline-block
+                position: absolute
+                right: 10px
             .dropdown-menu
                 li
                     a
@@ -950,9 +954,6 @@ $sheet-padding: 16px
 
         .oe-pager-buttons
             min-height: 30px
-    .oe_view_manager_inline, .oe_view_manager_inlineview
-        > .oe-view-manager-header
-            display: none
 
         // }}}
     // FormPopup {{{
@@ -1116,8 +1117,6 @@ $sheet-padding: 16px
         .divider
             display: none
         .filters-menu
-            overflow: auto
-            overflow-x: hidden
             .divider
                 display: list-item
         .closed-menu
@@ -1553,8 +1552,6 @@ $sheet-padding: 16px
             position: absolute
             margin-left: 10px
             font-weight: bold
-        .ui-widget-header
-            background: #cccccc url(/web/static/lib/jquery.ui/css/smoothness/images/ui-bg_highlight-soft_75_cccccc_1x100.png) 50% 50% repeat-x
     // }}}
     // FormView.fields {{{
     .oe_form
@@ -1673,7 +1670,9 @@ $sheet-padding: 16px
         .oe_form_field_html .oe_input_icon
             float: right
             margin: 4px 7px
-
+        // Override ViewManager overflow auto for One2Many fields
+        .oe-view-manager-content
+            overflow: hidden
     .oe_form_editable
         .oe_form
             .oe_form_field_integer input
@@ -1756,10 +1755,9 @@ $sheet-padding: 16px
                 box-shadow: none
                 border: none
                 text-shadow: none
-                .oe_e
+                .fa
                     position: relative
-                    top: -10px
-                    left: -9px                    
+                    font-size: 18px
             input.oe_form_binary_file
                 display: inline-block
                 margin-left: -85px
@@ -1780,10 +1778,10 @@ $sheet-padding: 16px
                 padding: 2px
                 padding-left: 4px
                 padding-right: 4px
-                .oe_e
+                .fa
                     font-size: 23px
                     margin-top: -5px
-                .oe_e:hover
+                .fa:hover
                     text-decoration: none
             .oe_attachment:nth-child(odd)
                 background: white
@@ -1800,12 +1798,20 @@ $sheet-padding: 16px
             top: 2px
             right: 0px
         .oe_m2o_cm_button
-            line-height: 14px
+            line-height: 27px
             float: right
             padding-left: 2px
+            font-size: 19px
+            color: #7C7BAD
+            cursor: pointer
         input
             padding-right: 13px
     &.ui-autocomplete
+        // http://bugs.jqueryui.com/ticket/8749
+        // https://github.com/jquery/jquery-ui/commit/d693ce5324f6f3be8479ef083e4eaf3c705ef043
+        // Odoo 8.0 currently uses JQuery 1.9.1, and the above fix, that we need, is in 1.9.2.
+        top: 0
+        left: 0
         li.oe_m2o_dropdown_option a
             font-style: italic
             padding-left: 2em
@@ -1906,6 +1912,9 @@ $sheet-padding: 16px
     .oe_form .oe_form_field_one2many > .oe_view_manager
         .oe_list_pager_single_page
             display: none
+    .oe_form .oe_form_field_one2many > .oe-view-manager
+        .oe_list_pager
+            float: right
     .oe_form_field_one2many,.oe_form_field_many2many
         // TODO: oe_form_field_one2many_list?
         > .oe_view_manager
@@ -1995,6 +2004,9 @@ $sheet-padding: 16px
             &.oe_form_field_datetime,&.oe_form_field_date
                 input.oe_datepicker_master
                     width: 100% !important
+                .oe_datepicker_main
+                    width: -webkit-calc(100% - 20px)
+                    width: calc(100% - 20px)
             &.oe_form_field_reference
                 display: table
     .oe_list_group_name
@@ -2112,6 +2124,8 @@ $sheet-padding: 16px
                         border-width: 0
                 > td.oe_list_field_boolean input
                     @include opacity()
+                > td.oe_list_field_boolean input:-moz-read-only
+                    @include opacity(1.0)
             > tr:nth-child(odd)
                 background-color: #f0f0fa
                 @include vertical-gradient(#f0f0fa, #eeeef6)
@@ -2137,8 +2151,10 @@ $sheet-padding: 16px
             padding: 0 !important
             cursor: ns-resize
             .oe_list_handle
-                @include text-to-entypo-icon("}",#E0E0E0,18px)
-                margin-right: 7px
+                font-size: 7px
+                color: #E0E0E0
+                margin-right: 10px
+                margin-top: 8px
         .oe_list_field_progressbar progress
             width: 100%
     // }}}
@@ -2209,11 +2225,7 @@ $sheet-padding: 16px
             float: right
         .oe_form_group_row_incomplete.oe_form_group_row_newline > td:last-child:after
             content: "[newline]"
-    .oe_debug_view
-        float: left
-        margin-top: 5px
-        width: auto
-    .oe_debug_view_log
+    .oe_debug_menu_log
         font-size: 95%
         line-height: 1.2em
     // }}}
@@ -2326,6 +2338,7 @@ div.ui-widget-overlay
     font-family: "Lucida Grande", Helvetica, Verdana, Arial, sans-serif
     color: #4c4c4c
     font-size: 13px
+    z-index: 1051
 
 .ui-menu
     padding: 2px 0
@@ -2337,14 +2350,15 @@ div.ui-widget-overlay
         padding: 0
         a
             padding: 1px 16px
+            color: #000000 !important
         a.ui-corner-all
             @include radius(0)
-        a.ui-state-active
-            background: #f0f0fa
-    .ui-menu-item a.ui-state-hover, .ui-menu-item a.ui-state-active
-        background: $tag-bg-dark
-        //color: #4c4c4c
-        //@include vertical-gradient(#f0f0fa, #eeeef6)
+    .ui-state-focus, .ui-state-active
+        background: #7c7bad !important
+        border: 1px solid #7c7bad !important
+        a
+            color: #ffffff !important
+            font-weight: normal !important
 
 .ui-corner-all
     @include radius(3px)
@@ -2502,9 +2516,16 @@ body.oe_single_form
 
 // @media print {{{
 @media print
+    body
+        height: auto !important
+    .openerp#announcement_bar_table
+        display: none
     .openerp
+        .oe_application, .oe_view_manager_wrapper
+            height: auto !important
         .oe_application > div > .oe_view_manager > .oe_view_manager_wrapper > div > .oe_view_manager_body
             overflow: visible
+            position: relative !important
         .oe_header_row, ul.oe_header, div.oe_mail_thread_action, .oe_mail_recthread_actions, .oe_button_box, .oe_form button, button.oe_invite, .oe_form header, .openerp .oe_notebook > li.ui-state-default, .oe_topbar, .oe_leftbar, .oe_loading
             // We use !important here because jQuery adds @style = display: block on elements when using $.fn.show()
             display: none !important
@@ -2514,7 +2535,7 @@ body.oe_single_form
         .tree_header button, .oe_mail .oe_mail_thread_msg .oe_mail_unread, .oe_mail_fetch_more, .oe_m2o_drop_down_button img, .oe_form_field_one2many_list_row_add
             visibility: hidden
         a
-            &.oe_m2o_cm_button, &.oe_e
+            &.oe_m2o_cm_button, &.fa
                 visibility: hidden
         .oe_form
             .oe_form_field_date img, .oe_form_field_datetime img
@@ -2527,7 +2548,7 @@ body.oe_single_form
                 box-shadow: 0px 0px 0px
                 .oe_list
                     overflow-x: visible
-        .oe_view_manager_current > .oe_view_manager_header
+        .oe-control-panel, .oe-o2m-control-panel
             border: 0px !important
             box-shadow: 0px 0px 0px
         text-shadow: none
@@ -2619,7 +2640,7 @@ body.oe_single_form
         margin: 0 4px 0 0
     .oe_act_window.modal-body
         padding: 0
-    .oe-view-manager-content > div
+    .oe-view-manager-content
         position: static !important
 
 @media (min-width: 768px)
@@ -2679,4 +2700,3 @@ body
 
 
 // au BufWritePost,FileWritePost *.sass :!sass --style expanded --line-numbers <afile> > "%:p:r.css"
-// vim:tabstop=4:shiftwidth=4:softtabstop=4:fdm=marker:

@@ -51,7 +51,7 @@
                 <search string="Hr Attendance Search">
                     <field name="name" string="Attendance"/>
                     <field name="action"/>
-                    <filter string="Today" name="today" domain="[('name','&gt;=',current_date),('name','&lt;=',current_date)]" />
+                    <filter string="Today" name="today" domain="[('name','&gt;=',datetime.datetime.now().replace(hour=0, minute=0, second=0)),('name','&lt;=',datetime.datetime.now().replace(hour=23, minute=59, second=59))]" />
                     <filter string="Current Month" domain="[('name','&gt;=', datetime.datetime.now().strftime('%Y-%m-01'))]" />
                     <separator/>
                     <filter string="My Attendance" domain="[('employee_id.user_id.id', '=', uid)]" />
@@ -59,7 +59,7 @@
                     <group expand="0" string="Group By">
                         <filter name="employee" string="Employee" context="{'group_by':'employee_id'}"/>
                         <separator/>
-                        <filter name="name" string="Month" context="{'group_by':'name'}"/>
+                        <filter name="groupby_name" string="Month" context="{'group_by':'name'}"/>
                     </group>
                 </search>
             </field>
@@ -104,6 +104,7 @@
             <field name="res_model">hr.attendance</field>
             <field name="view_type">form</field>
             <field name="view_mode">pivot,graph</field>
+            <field name="view_id"></field>  <!-- force empty -->
         </record>
 
         <menuitem id="menu_hr_time_tracking" name="Time Tracking" parent="hr.menu_hr_root" sequence="5" groups="base.group_user,base.group_hr_user,base.group_hr_manager"/>

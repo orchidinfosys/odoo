@@ -46,6 +46,7 @@ from openerp.osv import fields, osv, orm
 from openerp.osv.orm import BaseModel
 from openerp.tools.safe_eval import safe_eval as eval
 from openerp.tools.translate import _
+from openerp.exceptions import AccessError
 
 _logger = logging.getLogger(__name__)
 
@@ -85,23 +86,6 @@ class mail_thread(osv.AbstractModel):
     _mail_flat_thread = True
     _mail_post_access = 'write'
 
-    # Automatic logging system if mail installed
-    # _track = {
-    #   'field': {
-    #       'module.subtype_xml': lambda self, cr, uid, obj, context=None: obj[state] == done,
-    #       'module.subtype_xml2': lambda self, cr, uid, obj, context=None: obj[state] != done,
-    #   },
-    #   'field2': {
-    #       ...
-    #   },
-    # }
-    # where
-    #   :param string field: field name
-    #   :param module.subtype_xml: xml_id of a mail.message.subtype (i.e. mail.mt_comment)
-    #   :param obj: is a browse_record
-    #   :param function lambda: returns whether the tracking should record using this subtype
-    _track = {}
-
     # Mass mailing feature
     _mail_mass_mailing = False
 
@@ -129,22 +113,29 @@ class mail_thread(osv.AbstractModel):
             if alias_ids and len(alias_ids) == 1:
                 alias = alias_obj.browse(cr, uid, alias_ids[0], context=context)
 
-        if alias:
-            alias_email = alias.name_get()[0][1]
-            return _("""<p class='oe_view_nocontent_create'>
-                            Click here to add new %(document)s or send an email to: <a href='mailto:%(email)s'>%(email)s</a>
-                        </p>
-                        %(static_help)s"""
-                    ) % {
-                        'document': document_name,
-                        'email': alias_email,
-                        'static_help': help or ''
-                    }
+        add_arrow = not help or help.find("oe_view_nocontent_create") == -1
 
-        if document_name != 'document' and help and help.find("oe_view_nocontent_create") == -1:
-            return _("<p class='oe_view_nocontent_create'>Click here to add new %(document)s</p>%(static_help)s") % {
-                        'document': document_name,
-                        'static_help': help or '',
+        if alias:
+            email_link = "<a href='mailto:%(email)s'>%(email)s</a>" % {'email': alias.name_get()[0][1]}
+            if add_arrow:
+                return _("""<p class='oe_view_nocontent_create'>
+                                Click here to add new %(document)s or send an email to: %(email)s.
+                            </p>
+                            %(static_help)s"""
+                        ) % {
+                            'document': document_name, 'email': email_link, 'static_help': help or ''
+                        }
+
+            return _("""%(static_help)s
+                        <p>
+                            You could also add a new %(document)s by sending an email to: %(email)s.
+                        </p>""") % {
+                            'document': document_name, 'email': email_link, 'static_help': help or ''
+                        }
+
+        if add_arrow:
+             return _("<p class='oe_view_nocontent_create'>Click here to add new %(document)s</p>%(static_help)s") % {
+                         'document': document_name, 'static_help': help or ''
                     }
 
         return help
@@ -169,7 +160,7 @@ class mail_thread(osv.AbstractModel):
         for id in ids:
             if res[id]['message_unread_count']:
                 title = res[id]['message_unread_count'] > 1 and _("You have %d unread messages") % res[id]['message_unread_count'] or _("You have one unread message")
-                res[id]['message_summary'] = "<span class='oe_kanban_mail_new' title='%s'><span class='oe_e'>9</span> %d %s</span>" % (title, res[id].pop('message_unread_count'), _("New"))
+                res[id]['message_summary'] = "<span class='oe_kanban_mail_new' title='%s'><i class='fa fa-comments'/> %d</span>" % (title, res[id].pop('message_unread_count'))
             res[id].pop('message_unread_count', None)
         return res
 
@@ -386,7 +377,7 @@ class mail_thread(osv.AbstractModel):
         # auto_subscribe: take values and defaults into account
         create_values = dict(values)
         for key, val in context.iteritems():
-            if key.startswith('default_'):
+            if key.startswith('default_') and key[8:] not in create_values:
                 create_values[key[8:]] = val
         self.message_auto_subscribe(cr, uid, [thread_id], create_values.keys(), context=context, values=create_values)
 
@@ -465,13 +456,25 @@ class mail_thread(osv.AbstractModel):
         """
         tracked_fields = []
         for name, field in self._fields.items():
-            visibility = getattr(field, 'track_visibility', False)
-            if visibility == 'always' or (visibility == 'onchange' and name in updated_fields) or name in self._track:
+            if getattr(field, 'track_visibility', False):
                 tracked_fields.append(name)
 
         if tracked_fields:
             return self.fields_get(cr, uid, tracked_fields, context=context)
         return {}
+
+    def _track_subtype(self, cr, uid, ids, init_values, context=None):
+        """ Give the subtypes triggered by the changes on the record according
+        to values that have been updated.
+
+        :param ids: list of a single ID, the ID of the record being modified
+        :type ids: singleton list
+        :param init_values: the original values of the record; only modified fields
+                            are present in the dict
+        :type init_values: dict
+        :returns: a subtype xml_id or False if no subtype is trigerred
+        """
+        return False
 
     def message_track(self, cr, uid, ids, tracked_fields, initial_values, context=None):
 
@@ -529,28 +532,29 @@ class mail_thread(osv.AbstractModel):
                 continue
 
             # find subtypes and post messages or log if no subtype found
-            subtypes = []
+            subtype_xmlid = False
             # By passing this key, that allows to let the subtype empty and so don't sent email because partners_to_notify from mail_message._notify will be empty
             if not context.get('mail_track_log_only'):
-                for field, track_info in self._track.items():
-                    if field not in changes:
-                        continue
-                    for subtype, method in track_info.items():
-                        if method(self, cr, uid, browse_record, context):
-                            subtypes.append(subtype)
+                subtype_xmlid = browse_record._track_subtype(dict((col_name, initial[col_name]) for col_name in changes))
+                # compatibility: use the deprecated _track dict
+                if not subtype_xmlid and hasattr(self, '_track'):
+                    for field, track_info in self._track.items():
+                        if field not in changes or subtype_xmlid:
+                            continue
+                        for subtype, method in track_info.items():
+                            if method(self, cr, uid, browse_record, context):
+                                _logger.warning("Model %s still using deprecated _track dict; override _track_subtype method instead" % self._name)
+                                subtype_xmlid = subtype
 
-            posted = False
-            for subtype in subtypes:
-                subtype_rec = self.pool.get('ir.model.data').xmlid_to_object(cr, uid, subtype, context=context)
+            if subtype_xmlid:
+                subtype_rec = self.pool['ir.model.data'].xmlid_to_object(cr, uid, subtype_xmlid, context=context)
                 if not (subtype_rec and subtype_rec.exists()):
-                    _logger.debug('subtype %s not found' % subtype)
+                    _logger.debug('subtype %s not found' % subtype_xmlid)
                     continue
                 message = format_message(subtype_rec.description if subtype_rec.description else subtype_rec.name, tracked_values)
-                self.message_post(cr, uid, browse_record.id, body=message, subtype=subtype, context=context)
-                posted = True
-            if not posted:
+            else:
                 message = format_message('', tracked_values)
-                self.message_post(cr, uid, browse_record.id, body=message, context=context)
+            self.message_post(cr, uid, browse_record.id, body=message, subtype=subtype_xmlid, context=context)
         return True
 
     #------------------------------------------------------
@@ -582,6 +586,7 @@ class mail_thread(osv.AbstractModel):
         ir_attachment_obj.unlink(cr, uid, attach_ids, context=context)
         return True
 
+    @api.cr_uid_ids_context
     def check_mail_message_access(self, cr, uid, mids, operation, model_obj=None, context=None):
         """ mail.message check permission rules for related document. This method is
             meant to be inherited in order to implement addons-specific behavior.
@@ -638,9 +643,11 @@ class mail_thread(osv.AbstractModel):
         if not msg_id and not (model and res_id):
             return action
         if msg_id and not (model and res_id):
-            msg = self.pool.get('mail.message').browse(cr, uid, msg_id, context=context)
-            if msg.exists():
+            msg = self.pool.get('mail.message').browse(cr, uid, msg_id, context=context).exists()
+            try:
                 model, res_id = msg.model, msg.res_id
+            except AccessError:
+                pass
 
         # if model + res_id found: try to redirect to the document or fallback on the Inbox
         if model and res_id:
@@ -649,7 +656,7 @@ class mail_thread(osv.AbstractModel):
                 try:
                     model_obj.check_access_rule(cr, uid, [res_id], 'read', context=context)
                     action = model_obj.get_access_action(cr, uid, res_id, context=context)
-                except (osv.except_osv, orm.except_orm):
+                except AccessError:
                     pass
             action.update({
                 'context': {
@@ -803,7 +810,7 @@ class mail_thread(osv.AbstractModel):
             mail_mail.send(cr, uid, [mail_id], context=context)
 
         def _warn(message):
-            _logger.warning('Routing mail with Message-Id %s: route %s: %s',
+            _logger.info('Routing mail with Message-Id %s: route %s: %s',
                                 message_id, route, message)
 
         # Wrong model
@@ -937,6 +944,16 @@ class mail_thread(osv.AbstractModel):
         references = decode_header(message, 'References')
         in_reply_to = decode_header(message, 'In-Reply-To')
         thread_references = references or in_reply_to
+
+        # 0. First check if this is a bounce message or not.
+        #    See http://datatracker.ietf.org/doc/rfc3462/?include_text=1
+        #    As all MTA does not respect this RFC (googlemail is one of them),
+        #    we also need to verify if the message come from "mailer-daemon"
+        localpart = (tools.email_split(email_from) or [''])[0].split('@', 1)[0].lower()
+        if message.get_content_type() == 'multipart/report' or localpart == 'mailer-daemon':
+            _logger.info("Not routing bounce email from %s to %s with Message-Id %s",
+                         email_from, email_to, message_id)
+            return []
 
         # 1. message is a reply to an existing message (exact match of message_id)
         ref_match = thread_references and tools.reference_re.search(thread_references)
@@ -1352,7 +1369,7 @@ class mail_thread(osv.AbstractModel):
                 else:
                     stored_date = parsed_date.astimezone(tz=pytz.utc)
             except Exception:
-                _logger.warning('Failed to parse Date header %r in incoming mail '
+                _logger.info('Failed to parse Date header %r in incoming mail '
                                 'with message-id %r, assuming current date/time.',
                                 message.get('Date'), message_id)
                 stored_date = datetime.datetime.now()
@@ -1442,18 +1459,34 @@ class mail_thread(osv.AbstractModel):
                     if follower.email == email_address:
                         partner_id = follower.id
             # second try: check in partners that are also users
+            # Escape special SQL characters in email_address to avoid invalid matches
+            email_address = (email_address.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_'))
+            email_brackets = "<%s>" % email_address
             if not partner_id:
-                ids = partner_obj.search(cr, SUPERUSER_ID, [
-                                                ('email', 'ilike', email_address),
-                                                ('user_ids', '!=', False)
-                                            ], limit=1, context=context)
+                # exact, case-insensitive match
+                ids = partner_obj.search(cr, SUPERUSER_ID,
+                                         [('email', '=ilike', email_address),
+                                          ('user_ids', '!=', False)],
+                                         limit=1, context=context)
+                if not ids:
+                    # if no match with addr-spec, attempt substring match within name-addr pair
+                    ids = partner_obj.search(cr, SUPERUSER_ID,
+                                             [('email', 'ilike', email_brackets),
+                                              ('user_ids', '!=', False)],
+                                             limit=1, context=context)
                 if ids:
                     partner_id = ids[0]
             # third try: check in partners
             if not partner_id:
-                ids = partner_obj.search(cr, SUPERUSER_ID, [
-                                                ('email', 'ilike', email_address)
-                                            ], limit=1, context=context)
+                # exact, case-insensitive match
+                ids = partner_obj.search(cr, SUPERUSER_ID,
+                                         [('email', '=ilike', email_address)],
+                                         limit=1, context=context)
+                if not ids:
+                    # if no match with addr-spec, attempt substring match within name-addr pair
+                    ids = partner_obj.search(cr, SUPERUSER_ID,
+                                             [('email', 'ilike', email_brackets)],
+                                             limit=1, context=context)
                 if ids:
                     partner_id = ids[0]
             partner_ids.append(partner_id)
@@ -1473,13 +1506,15 @@ class mail_thread(osv.AbstractModel):
             partner_id = partner_ids[idx]
             partner_info = {'full_name': email_address, 'partner_id': partner_id}
             result.append(partner_info)
-
             # link mail with this from mail to the new partner id
             if link_mail and partner_info['partner_id']:
+                # Escape special SQL characters in email_address to avoid invalid matches
+                email_address = (email_address.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_'))
+                email_brackets = "<%s>" % email_address
                 message_ids = mail_message_obj.search(cr, SUPERUSER_ID, [
                                     '|',
-                                    ('email_from', '=', email_address),
-                                    ('email_from', 'ilike', '<%s>' % email_address),
+                                    ('email_from', '=ilike', email_address),
+                                    ('email_from', 'ilike', email_brackets),
                                     ('author_id', '=', False)
                                 ], context=context)
                 if message_ids:
@@ -1555,7 +1590,7 @@ class mail_thread(osv.AbstractModel):
                 isinstance(thread_id, (int, long)) or \
                 (isinstance(thread_id, (list, tuple)) and len(thread_id) == 1), \
                 "Invalid thread_id; should be 0, False, an ID or a list with one ID"
-        if isinstance(thread_id, (list, tuple)):
+        if thread_id and isinstance(thread_id, (list, tuple)):
             thread_id = thread_id[0]
 
         # if we're processing a message directly coming from the gateway, the destination model was
@@ -1698,7 +1733,7 @@ class mail_thread(osv.AbstractModel):
             try:
                 self.check_access_rights(cr, uid, 'read')
                 self.check_access_rule(cr, uid, ids, 'read')
-            except (osv.except_osv, orm.except_orm):
+            except AccessError:
                 return False
         else:
             self.check_access_rights(cr, uid, 'write')
@@ -1803,7 +1838,17 @@ class mail_thread(osv.AbstractModel):
                         ('model', '=', self._name),
                         ('res_id', '=', record_id)], limit=1, context=context)
                 if msg_ids:
-                    self.pool.get('mail.notification')._notify(cr, uid, msg_ids[0], partners_to_notify=partner_ids, context=context)
+                    notification_obj = self.pool.get('mail.notification')
+                    notification_obj._notify(cr, uid, msg_ids[0], partners_to_notify=partner_ids, context=context)
+                    message = message_obj.browse(cr, uid, msg_ids[0], context=context)
+                    if message.parent_id:
+                        partner_ids_to_parent_notify = set(partner_ids).difference(partner.id for partner in message.parent_id.notified_partner_ids)
+                        for partner_id in partner_ids_to_parent_notify:
+                            notification_obj.create(cr, uid, {
+                                'message_id': message.parent_id.id,
+                                'partner_id': partner_id,
+                                'is_read': True,
+                            }, context=context)
 
     def message_auto_subscribe(self, cr, uid, ids, updated_fields, context=None, values=None):
         """ Handle auto subscription. Two methods for auto subscription exist:
@@ -1884,6 +1929,7 @@ class mail_thread(osv.AbstractModel):
             self.message_subscribe(cr, uid, ids, [pid], subtypes, context=context)
 
         self._message_auto_subscribe_notify(cr, uid, ids, user_pids, context=context)
+
 
         return True
 

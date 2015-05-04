@@ -33,10 +33,8 @@ professional emails and reuse templates in a few clicks.
     'category': 'Marketing',
     'depends': [
         'mail',
-        'email_template',
         'marketing',
         'web_kanban_gauge',
-        'web_kanban_sparkline',
         'website_mail',
         'website_links',
         'utm',
@@ -55,6 +53,7 @@ professional emails and reuse templates in a few clicks.
         'views/snippets.xml',
         'security/ir.model.access.csv',
         'views/mass_mailing.xml',
+        'views/unsubscribe.xml',
     ],
     'qweb': [],
     'demo': [
@@ -62,4 +61,5 @@ professional emails and reuse templates in a few clicks.
     ],
     'installable': True,
     'auto_install': False,
+    'application': True,
 }

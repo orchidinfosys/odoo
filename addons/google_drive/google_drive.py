@@ -20,8 +20,10 @@
 import logging
 
 from openerp import SUPERUSER_ID
+from openerp.addons.google_account import TIMEOUT
 from openerp.osv import fields, osv
 from openerp.tools.translate import _
+from openerp.exceptions import UserError
 
 import werkzeug.urls
 import urllib2
@@ -46,7 +48,7 @@ class config(osv.Model):
         try:
             name_gdocs = name_gdocs % record
         except:
-            raise osv.except_osv(_('Key Error!'), _("At least one key cannot be found in your Google Drive name pattern"))
+            raise UserError(_("At least one key cannot be found in your Google Drive name pattern"))
 
         attach_pool = self.pool.get("ir.attachment")
         attach_ids = attach_pool.search(cr, uid, [('res_model', '=', model.model), ('name', '=', name_gdocs), ('res_id', '=', res_id)])
@@ -68,7 +70,7 @@ class config(osv.Model):
                 msg = _("You haven't configured 'Authorization Code' generated from google, Please generate and configure it .")
                 raise openerp.exceptions.RedirectWarning(msg, action_id, _('Go to the configuration panel'))
             else:
-                raise osv.except_osv(_('Error!'), _("Google Drive is not yet configured. Please contact your administrator."))
+                raise UserError(_("Google Drive is not yet configured. Please contact your administrator."))
         google_drive_client_id = ir_config.get_param(cr, SUPERUSER_ID, 'google_drive_client_id')
         google_drive_client_secret = ir_config.get_param(cr, SUPERUSER_ID, 'google_drive_client_secret')
         #For Getting New Access Token With help of old Refresh Token
@@ -81,14 +83,14 @@ class config(osv.Model):
         headers = {"Content-type": "application/x-www-form-urlencoded", "Accept-Encoding": "gzip, deflate"}
         try:
             req = urllib2.Request('https://accounts.google.com/o/oauth2/token', data, headers)
-            content = urllib2.urlopen(req).read()
+            content = urllib2.urlopen(req, timeout=TIMEOUT).read()
         except urllib2.HTTPError:
             if user_is_admin:
                 model, action_id = self.pool['ir.model.data'].get_object_reference(cr, uid, 'base_setup', 'action_general_configuration')
                 msg = _("Something went wrong during the token generation. Please request again an authorization code .")
                 raise openerp.exceptions.RedirectWarning(msg, action_id, _('Go to the configuration panel'))
             else:
-                raise osv.except_osv(_('Error!'), _("Google Drive is not yet configured. Please contact your administrator."))
+                raise UserError(_("Google Drive is not yet configured. Please contact your administrator."))
         content = json.loads(content)
         return content.get('access_token')
 
@@ -101,9 +103,9 @@ class config(osv.Model):
         headers = {"Content-type": "application/x-www-form-urlencoded", "Accept-Encoding": "gzip, deflate"}
         try:
             req = urllib2.Request(request_url, None, headers)
-            parents = urllib2.urlopen(req).read()
+            parents = urllib2.urlopen(req, timeout=TIMEOUT).read()
         except urllib2.HTTPError:
-            raise osv.except_osv(_('Warning!'), _("The Google Template cannot be found. Maybe it has been deleted."))
+            raise UserError(_("The Google Template cannot be found. Maybe it has been deleted."))
         parents_dict = json.loads(parents)
 
         record_url = "Click on link to open Record in Odoo\n %s/?db=%s#id=%s&model=%s" % (google_web_base_url, cr.dbname, res_id, res_model)
@@ -113,7 +115,7 @@ class config(osv.Model):
         data_json = json.dumps(data)
         # resp, content = Http().request(request_url, "POST", data_json, headers)
         req = urllib2.Request(request_url, data_json, headers)
-        content = urllib2.urlopen(req).read()
+        content = urllib2.urlopen(req, timeout=TIMEOUT).read()
         content = json.loads(content)
         res = {}
         if content.get('alternateLink'):
@@ -128,7 +130,7 @@ class config(osv.Model):
             data = {'role': 'writer', 'type': 'anyone', 'value': '', 'withLink': True}
             try:
                 req = urllib2.Request(request_url, json.dumps(data), headers)
-                urllib2.urlopen(req)
+                urllib2.urlopen(req, timeout=TIMEOUT)
             except urllib2.HTTPError:
                 raise self.pool.get('res.config.settings').get_config_warning(cr, _("The permission 'reader' for 'anyone with the link' has not been written on the document"), context=context)
             user = self.pool['res.users'].browse(cr, uid, uid, context=context)
@@ -136,10 +138,10 @@ class config(osv.Model):
                 data = {'role': 'writer', 'type': 'user', 'value': user.email}
                 try:
                     req = urllib2.Request(request_url, json.dumps(data), headers)
-                    urllib2.urlopen(req)
+                    urllib2.urlopen(req, timeout=TIMEOUT)
                 except urllib2.HTTPError:
                     pass
-        return res 
+        return res
 
     def get_google_drive_config(self, cr, uid, res_model, res_id, context=None):
         '''
@@ -154,7 +156,7 @@ class config(osv.Model):
           :return: the config id and config name
         '''
         if not res_id:
-            raise osv.except_osv(_('Google Drive Error!'), _("Creating google drive may only be done by one at a time."))
+            raise UserError(_("Creating google drive may only be done by one at a time."))
         # check if a model is configured with a template
         config_ids = self.search(cr, uid, [('model_id', '=', res_model)], context=context)
         configs = []
@@ -186,7 +188,7 @@ class config(osv.Model):
             if mo:
                 result[data.id] = mo
             else:
-                raise osv.except_osv(_('Incorrect URL!'), _("Please enter a valid Google Document URL."))
+                raise UserError(_("Please enter a valid Google Document URL."))
         return result
 
     def _client_id_get(self, cr, uid, ids, name, arg, context=None):
