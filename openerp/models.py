@@ -3510,6 +3510,8 @@ class BaseModel(object):
             # have log_access enabled so that the create_uid column is always there.
             # And even with _inherits, these fields are always present in the local
             # table too, so no need for JOINs.
+            if self._table == 'stock_transfer_details_items':
+                return
             cr.execute("""SELECT distinct create_uid
                           FROM %s
                           WHERE id IN %%s""" % self._table, (tuple(ids),))
