@@ -739,11 +739,12 @@ class account_invoice(models.Model):
             if self.currency_id != company_currency:
                 currency = self.currency_id.with_context(date=self.date_invoice or fields.Date.context_today(self))
                 line['currency_id'] = currency.id
-                line['amount_currency'] = line['price']
+                line['amount_currency'] = currency.round(line['price'])
                 line['price'] = currency.compute(line['price'], company_currency)
             else:
                 line['currency_id'] = False
                 line['amount_currency'] = False
+                line['price'] = self.currency_id.round(line['price'])
             line['ref'] = ref
             if self.type in ('out_invoice','in_refund'):
                 total += line['price']
@@ -1346,13 +1347,16 @@ class account_invoice_line(models.Model):
             if product.description_purchase:
                 values['name'] += '\n' + product.description_purchase
 
-        taxes = fpos.map_tax(taxes)
-        values['invoice_line_tax_id'] = taxes.ids
+        fp_taxes = fpos.map_tax(taxes)
+        values['invoice_line_tax_id'] = fp_taxes.ids
 
         if type in ('in_invoice', 'in_refund'):
-            values['price_unit'] = price_unit or product.standard_price
+            if price_unit and price_unit != product.standard_price:
+                values['price_unit'] = price_unit
+            else:
+                values['price_unit'] = self.env['account.tax']._fix_tax_included_price(product.standard_price, taxes, fp_taxes.ids)
         else:
-            values['price_unit'] = product.lst_price
+            values['price_unit'] = self.env['account.tax']._fix_tax_included_price(product.lst_price, taxes, fp_taxes.ids)
 
         values['uos_id'] = product.uom_id.id
         if uom_id:
@@ -1367,8 +1371,6 @@ class account_invoice_line(models.Model):
 
         if company and currency:
             if company.currency_id != currency:
-                if type in ('in_invoice', 'in_refund'):
-                    values['price_unit'] = product.standard_price
                 values['price_unit'] = values['price_unit'] * currency.rate
 
             if values['uos_id'] and values['uos_id'] != product.uom_id.id:
@@ -1533,7 +1535,8 @@ class account_invoice_tax(models.Model):
             currency = self.env['res.currency'].browse(currency_id)
             currency = currency.with_context(date=date_invoice or fields.Date.context_today(self))
             amount = currency.compute(amount, company.currency_id, round=False)
-        return {'value': {'tax_amount': amount}}
+        tax_sign = (self.tax_amount / self.amount) if self.amount else 1
+        return {'value': {'tax_amount': amount * tax_sign}}
 
     @api.v8
     def compute(self, invoice):

@@ -1047,7 +1047,7 @@ openerp.account = function (instance) {
                 new instance.web.Dialog(this, {
                     title: _t("Warning"),
                     size: 'medium',
-                }, $("<div />").text(_.str.sprintf(_t("You are selecting transactions from both a payable and a receivable account.\n\nIn order to proceed, you first need to deselect the %s transactions."), last_selected_line.account_type))).open();
+                }, $("<div />").text(_.str.sprintf(_t("You are selecting transactions from both a payable and a receivable account.\n\nIn order to proceed, you first need to deselect the %s transactions."), _t("last")))).open();
                 return;
             }
 
@@ -1186,10 +1186,13 @@ openerp.account = function (instance) {
     
         changePartnerClickHandler: function() {
             var self = this;
-            self.$(".change_partner_container").find("input").attr("placeholder", self.st_line.partner_name);
+            var partner_name = self.st_line.partner_name;
             self.$(".change_partner_container").show();
             self.$(".partner_name").hide();
-            self.change_partner_field.$drop_down.trigger("click");
+            self.changePartner(false).then(function(){
+                self.$(".change_partner_container").find("input").attr("placeholder", partner_name);
+                self.change_partner_field.$drop_down.trigger("click");
+            })
         },
     
     
@@ -1300,8 +1303,14 @@ openerp.account = function (instance) {
 
             // Show or hide partial reconciliation
             if (self.get("mv_lines_selected").length > 0) {
-                var propose_partial = self.getCreatedLines().length === 0 && self.get("mv_lines_selected").length === 1 && balance_type === "greater" && ! self.get("mv_lines_selected")[0].partial_reconcile;
-                self.get("mv_lines_selected")[0].propose_partial_reconcile = propose_partial;
+                var last_line = _.last(self.get("mv_lines_selected"));
+                var propose_partial = self.getCreatedLines().length === 0
+                    && balance_type === "greater"
+                    && Math.abs(self.get("balance")) < Math.abs(last_line.debit - last_line.credit)
+                    && self.get("balance") * (last_line.debit - last_line.credit) < 0
+                    && ! last_line.partial_reconcile
+                    && ! last_line.already_paid;
+                last_line.propose_partial_reconcile = propose_partial;
                 self.updateAccountingViewMatchedLines();
             }
 
@@ -1400,6 +1409,12 @@ openerp.account = function (instance) {
     
         mvLinesSelectedChanged: function(elt, val) {
             var self = this;
+
+            // Reset partial reconciliation
+            _.each(self.get("mv_lines_selected"), function(line) {
+                if (line.partial_reconcile === true) self.unpartialReconcileLine(line);
+                if (line.propose_partial_reconcile === true) line.propose_partial_reconcile = false;
+            });
         
             var added_lines = _.difference(val.newValue, val.oldValue);
             var removed_lines = _.difference(val.oldValue, val.newValue);
@@ -1548,15 +1563,6 @@ openerp.account = function (instance) {
             var mv_lines_selected = self.get("mv_lines_selected");
             var lines_selected_num = mv_lines_selected.length;
 
-            // Undo partial reconciliation if necessary
-            if (lines_selected_num !== 1) {
-                _.each(mv_lines_selected, function(line) {
-                    if (line.partial_reconcile === true) self.unpartialReconcileLine(line);
-                    if (line.propose_partial_reconcile === true) line.propose_partial_reconcile = false;
-                });
-                self.updateAccountingViewMatchedLines();
-            }
-
             // Compute balance
             var balance = 0;
             balance -= self.st_line.amount;
@@ -1614,10 +1620,9 @@ openerp.account = function (instance) {
                 // Update model
                 .call("write", [[self.st_line_id], {'partner_id': partner_id}])
                 .then(function () {
-                    self.do_load_reconciliation_proposition = false; // of the server might set the statement line's partner
+                    self.do_load_reconciliation_proposition = true; // the server will set the statement line with the new partner
                     self.animation_speed = 0;
                     return $.when(self.restart(self.get("mode"))).then(function(){
-                        self.do_load_reconciliation_proposition = true;
                         self.is_consistent = true;
                         self.set("mode", "match");
                     });

@@ -424,6 +424,8 @@ class stock_move(osv.osv):
                     fp = move.picking_id.sale_id.fiscal_position
                     res = self.pool.get("account.invoice.line").product_id_change(cr, uid, [], move.product_id.id, None, partner_id=move.picking_id.partner_id.id, fposition_id=(fp and fp.id), context=context)
                     extra_move_tax[0, move.product_id] = [(6, 0, res['value']['invoice_line_tax_id'])]
+                else:
+                    extra_move_tax[0, move.product_id] = [(6, 0, [x.id for x in move.product_id.product_tmpl_id.taxes_id])]
         return (is_extra_move, extra_move_tax)
 
     def _get_taxes(self, cr, uid, move, context=None):
@@ -445,12 +447,13 @@ class stock_picking(osv.osv):
         """ Inherit the original function of the 'stock' module
             We select the partner of the sales order as the partner of the customer invoice
         """
-        if picking.sale_id:
-            saleorder_ids = self.pool['sale.order'].search(cr, uid, [('procurement_group_id' ,'=', picking.group_id.id)], context=context)
-            saleorders = self.pool['sale.order'].browse(cr, uid, saleorder_ids, context=context)
-            if saleorders and saleorders[0] and saleorders[0].order_policy == 'picking':
-                saleorder = saleorders[0]
-                return saleorder.partner_invoice_id.id
+        if context.get('inv_type') and context['inv_type'] in ('out_invoice', 'out_refund'):
+            if picking.sale_id:
+                saleorder_ids = self.pool['sale.order'].search(cr, uid, [('procurement_group_id' ,'=', picking.group_id.id)], context=context)
+                saleorders = self.pool['sale.order'].browse(cr, uid, saleorder_ids, context=context)
+                if saleorders and saleorders[0] and saleorders[0].order_policy == 'picking':
+                    saleorder = saleorders[0]
+                    return saleorder.partner_invoice_id.id
         return super(stock_picking, self)._get_partner_to_invoice(cr, uid, picking, context=context)
     
     def _get_sale_id(self, cr, uid, ids, name, args, context=None):
@@ -478,7 +481,7 @@ class stock_picking(osv.osv):
     def _get_invoice_vals(self, cr, uid, key, inv_type, journal_id, move, context=None):
         inv_vals = super(stock_picking, self)._get_invoice_vals(cr, uid, key, inv_type, journal_id, move, context=context)
         sale = move.picking_id.sale_id
-        if sale:
+        if sale and inv_type in ('out_invoice', 'out_refund'):
             inv_vals.update({
                 'fiscal_position': sale.fiscal_position.id,
                 'payment_term': sale.payment_term.id,
