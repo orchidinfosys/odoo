@@ -175,6 +175,8 @@ class stock_move(osv.osv):
                                                                                 'uom': move.product_uom.id,
                                                                                 'date': move.date,
                                                                                 })[pricelist]
+                if move.product_uom.id != move.product_id.uom_id.id:
+                   price *= move.product_uom.factor / move.product_id.uom_id.factor                                                                                
                 if price:
                     return self.write(cr, uid, [move.id], {'price_unit': price}, context=context)
         super(stock_move, self).attribute_price(cr, uid, move, context=context)
