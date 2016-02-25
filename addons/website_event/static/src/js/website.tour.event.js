@@ -3,12 +3,13 @@ odoo.define('website_event.tour', function (require) {
 
 var core = require('web.core');
 var Tour = require('web.Tour');
+var base = require('web_editor.base');
 var website = require('website.website');
 
 
 var _t = core._t;
 
-website.ready().done(function () {
+base.ready().done(function () {
     Tour.register({
         id:   'event',
         name: _t("Create an event"),
@@ -19,10 +20,10 @@ website.ready().done(function () {
                 popover:   { next: _t("Start Tutorial"), end: _t("Skip It") },
             },
             {
-                element:   '#content-menu-button',
-                placement: 'left',
+                element:   '#oe_main_menu_navbar a[data-action=new_page]',
+                placement: 'bottom',
                 title:     _t("Add Content"),
-                content:   _t("The <em>Content</em> menu allows you to create new pages, events, menus, etc."),
+                content:   _t("This button allows you to create new pages, events, menus, etc."),
                 popover:   { fixed: true },
             },
             {
@@ -41,7 +42,7 @@ website.ready().done(function () {
             },
             {
                 waitNot:   '.modal-dialog #editor_new_event input[type=text]:not([value!=""])',
-                element:   '.modal-dialog button.btn-primary',
+                element:   '.modal-dialog button.btn-primary.btn-continue',
                 placement: 'right',
                 title:     _t("Create Event"),
                 content:   _t("Click <em>Continue</em> to create the event."),
@@ -60,21 +61,14 @@ website.ready().done(function () {
                 popover:   { fixed: true },
             },
             {
-                snippet:   '#snippet_structure .oe_snippet:eq(4)',
-                placement: 'bottom',
-                title:     _t("Drag & Drop a block"),
-                content:   _t("Drag the 'Text Block' in your event page."),
-                popover:   { fixed: true },
-            },
-            {
                 element:   'button[data-action=save]',
-                placement: 'right',
+                placement: 'bottom',
                 title:     _t("Save your modifications"),
                 content:   _t("Once you click on save, your event is updated."),
                 popover:   { fixed: true },
             },
             {
-                waitFor:   'button[data-action=edit]:visible',
+                waitNot:   '#web_editor-top-edit',
                 element:   'button.btn-danger.js_publish_btn',
                 placement: 'top',
                 title:     _t("Publish your event"),

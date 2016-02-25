@@ -2,9 +2,8 @@
 import logging
 import werkzeug.utils
 
-from openerp import http
-from openerp.http import request
-from openerp.addons.web.controllers.main import login_redirect, abort_and_redirect
+from odoo import http
+from odoo.http import request
 
 _logger = logging.getLogger(__name__)
 
@@ -12,18 +11,10 @@ _logger = logging.getLogger(__name__)
 class PosController(http.Controller):
 
     @http.route('/pos/web', type='http', auth='user')
-    def a(self, debug=False, **k):
-        cr, uid, context, session = request.cr, request.uid, request.context, request.session
-
+    def pos_web(self, debug=False, **k):
         # if user not logged in, log him in
-        if not session.uid:
-            return login_redirect()
-
-        PosSession = request.registry['pos.session']
-        pos_session_ids = PosSession.search(cr, uid, [('state','=','opened'),('user_id','=',session.uid)], context=context)
-        if not pos_session_ids:
-            return werkzeug.utils.redirect('/web#action=point_of_sale.action_pos_session_opening')
-        PosSession.login(cr, uid, pos_session_ids, context=context)
-        
+        pos_sessions = request.env['pos.session'].search([('state', '=', 'opened'), ('user_id', '=', request.session.uid)])
+        if not pos_sessions:
+            return werkzeug.utils.redirect('/web#action=point_of_sale.action_client_pos_menu')
+        pos_sessions.login()
         return request.render('point_of_sale.index')
-

@@ -7,7 +7,6 @@ var session = require('web.session');
 var Widget = require('web.Widget');
 
 var _t = core._t;
-var Spinner = window.Spinner;
 
 var messages_by_seconds = function() {
     return [
@@ -24,23 +23,6 @@ var messages_by_seconds = function() {
 var Throbber = Widget.extend({
     template: "Throbber",
     start: function() {
-        var opts = {
-          lines: 13, // The number of lines to draw
-          length: 7, // The length of each line
-          width: 4, // The line thickness
-          radius: 10, // The radius of the inner circle
-          rotate: 0, // The rotation offset
-          color: '#FFF', // #rgb or #rrggbb
-          speed: 1, // Rounds per second
-          trail: 60, // Afterglow percentage
-          shadow: false, // Whether to render a shadow
-          hwaccel: false, // Whether to use hardware acceleration
-          className: 'spinner', // The CSS class to assign to the spinner
-          zIndex: 2e9, // The z-index (defaults to 2000000000)
-          top: 'auto', // Top position relative to parent in px
-          left: 'auto' // Left position relative to parent in px
-        };
-        this.spin = new Spinner(opts).spin(this.$el[0]);
         this.start_time = new Date().getTime();
         this.act_message();
     },
@@ -58,11 +40,6 @@ var Throbber = Widget.extend({
             self.$(".oe_throbber_message").html(mes);
             self.act_message();
         }, 1000);
-    },
-    destroy: function() {
-        if (this.spin)
-            this.spin.stop();
-        this._super();
     },
 });
 
@@ -93,12 +70,14 @@ function blockUI () {
     var throbber = new Throbber();
     throbbers.push(throbber);
     throbber.appendTo($(".oe_blockui_spin_container"));
+    $('body').addClass('o_ui_blocked');
     return tmp;
 }
 
 function unblockUI () {
     _.invoke(throbbers, 'destroy');
     throbbers = [];
+    $('body').removeClass('o_ui_blocked');
     return $.unblockUI.apply($, arguments);
 }
 
@@ -241,6 +220,7 @@ $.fn.tooltip.Constructor.DEFAULTS.placement = 'auto top';
 $.fn.tooltip.Constructor.DEFAULTS.html = true;
 $.fn.tooltip.Constructor.DEFAULTS.trigger = 'hover focus click';
 $.fn.tooltip.Constructor.DEFAULTS.container = 'body';
+$.fn.tooltip.Constructor.DEFAULTS.delay = { show: 1000, hide: 0 };
 //overwrite bootstrap tooltip method to prevent showing 2 tooltip at the same time
 var bootstrap_show_function = $.fn.tooltip.Constructor.prototype.show;
 $.fn.modal.Constructor.prototype.enforceFocus = function () { };
@@ -322,18 +302,65 @@ $.extend( proto, {
     }
 });
 
+/**
+ * Private function that triggers an event on core.bus
+ * @param {htmlString or Element or Array or jQuery} [content] the content that
+ * has been attached in the DOM
+ */
+function _notify (content) {
+    core.bus.trigger('DOM_updated', content);
+}
+/**
+ * Appends content in a jQuery object and optionnally triggers an event
+ * @param {jQuery} [$target] the node where content will be appended
+ * @param {htmlString or Element or Array or jQuery} [content] DOM element,
+ * array of elements, HTML string or jQuery object to append to $target
+ * @param {jQuery} [trigger] true to trigger an event, false otherwise
+ */
+function append ($target, content, trigger) {
+    $target.append(content);
+    if (trigger) {
+        _notify(content);
+    }
+}
+/**
+ * Prepends content in a jQuery object and optionnally triggers an event
+ * @param {jQuery} [$target] the node where content will be prepended
+ * @param {htmlString or Element or Array or jQuery} [content] DOM element,
+ * array of elements, HTML string or jQuery object to prepend to $target
+ * @param {jQuery} [trigger] true to trigger an event, false otherwise
+ */
+function prepend ($target, content, trigger) {
+    $target.prepend(content);
+    if (trigger) {
+        _notify(content);
+    }
+}
+
+/**
+ * Returns the distance between a DOM element and the top-left corner of the window
+ * @param {element} [e] the DOM element
+ * @return {Object} the left and top distances in pixels
+ */
+function getPosition(e) {
+    var position = {left: 0, top: 0};
+    while (e) {
+        position.left += e.offsetLeft;
+        position.top += e.offsetTop;
+        e = e.offsetParent;
+    }
+    return position;
+}
+
 return {
     blockUI: blockUI,
     unblockUI: unblockUI,
     redirect: redirect,
+    append: append,
+    prepend: prepend,
+    getPosition: getPosition,
 };
 
-});
-
-odoo.define('web.session', function (require) {
-    var Session = require('web.Session');
-    var modules = odoo._modules;
-    return new Session(undefined, undefined, {modules:modules});
 });
 
 odoo.define('web.IFrameWidget', function (require) {

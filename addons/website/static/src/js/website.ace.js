@@ -5,18 +5,24 @@ var ajax = require('web.ajax');
 var Class = require('web.Class');
 var core = require('web.core');
 var Widget = require('web.Widget');
+var base = require('web_editor.base');
 var ace_call = require('website.ace_call');
 var website = require('website.website');
 
 var _t = core._t;
-var QWeb = core.qweb;
+var qweb = core.qweb;
 
 var hash = "#advanced-view-editor";
 
-website.add_template_file('/website/static/src/xml/website.ace.xml');
+ajax.loadXML('/website/static/src/xml/website.ace.xml', qweb);
 
 var Ace = Widget.extend({
+    events: {
+        'click a[data-action=ace]': 'launchAce',
+    },
     launchAce: function (e) {
+        ace_call.load();
+
         if (e) {
             e.preventDefault();
         }
@@ -99,10 +105,6 @@ var ViewEditor = Widget.extend({
             self.aceEditor.resize();
             self.$el.width(width);
         }
-        function resizeEditorHeight(height) {
-            self.$el.css('top', height);
-            self.$('.ace_editor').css('bottom', height);
-        }
         function storeEditorWidth() {
             window.localStorage.setItem('ace_editor_width', self.$el.width());
         }
@@ -130,13 +132,9 @@ var ViewEditor = Widget.extend({
         self.$('.ace_gutter').mouseup(stopResizing).mousedown(startResizing).click(stopResizing);
         $(document).mousemove(updateWidth);
         $('button[data-action=edit]').click(function () {
-           self.close();
-        });
-        this.getParent().on('change:height', this, function () {
-            resizeEditorHeight(this.getParent().$el.outerHeight()+2);
+            self.close();
         });
         resizeEditor(readEditorWidth());
-        resizeEditorHeight(this.getParent().$el.outerHeight()+2);
     },
     loadTemplates: function () {
         var self = this;
@@ -213,8 +211,8 @@ var ViewEditor = Widget.extend({
         ajax.jsonRpc('/web/dataset/call', 'call', {
             model: 'ir.ui.view',
             method: 'read',
-            args: [[viewId], ['arch'], website.get_context()],
-        }).then(function(result) {
+            args: [[viewId], ['arch'], _.extend(base.get_context(), {'lang': null})],
+        }).then(function (result) {
             var editingSession = self.buffers[viewId] = new ace.EditSession(result[0].arch);
             editingSession.setMode("ace/mode/xml");
             editingSession.setUndoManager(new ace.UndoManager());
@@ -286,7 +284,7 @@ var ViewEditor = Widget.extend({
             ajax.jsonRpc('/web/dataset/call', 'call', {
                 model: 'ir.ui.view',
                 method: 'write',
-                args: [[session.id], { 'arch':  xml.xml }, website.get_context()],
+                args: [[session.id], { 'arch':  xml.xml }, _.extend(base.get_context(), {'lang': null})],
             }).then(function () {
                 def.resolve();
             }).fail(function (source, error) {
@@ -353,12 +351,7 @@ var ViewEditor = Widget.extend({
             this.$("#ace-view-list").val(session.id).change();
         }
 
-        var $dialog = $(QWeb.render('website.error_dialog', {
-            title: session.text.match(/\s+name=['"]([^'"]+)['"]/i)[1],
-            message:"<b>Malformed XML document</b>:<br/>" + message
-        }));
-        $dialog.appendTo("body");
-        $dialog.modal('show');
+        website.error(session.text.match(/\s+name=['"]([^'"]+)['"]/i)[1], "<b>Malformed XML document</b>:<br/>" + message);
     },
     open: function () {
         this.$el.removeClass('oe_ace_closed').addClass('oe_ace_open');
@@ -369,12 +362,14 @@ var ViewEditor = Widget.extend({
     },
 });
 
-website.ready().done(function() {
-    var ace = new Ace();
-    $(document.body).on('click', 'a[data-action=ace]', function() {
-        ace_call.load();
-        ace.launchAce();
-    });
+website.TopBar.include({
+    start: function () {
+        this.ace = new Ace();
+        return $.when(
+            this._super.apply(this, arguments),
+            this.ace.attachTo($('#html_editor'))
+        );
+    },
 });
 
 });

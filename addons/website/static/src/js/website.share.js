@@ -1,13 +1,15 @@
 odoo.define('website.share', function (require) {
 "use strict";
 
+var ajax = require('web.ajax');
 var core = require('web.core');
 var Widget = require('web.Widget');
-var website = require('website.website');
+var base = require('web_editor.base');
 
+var _t = core._t;
 var qweb = core.qweb;
 
-website.add_template_file('/website/static/src/xml/website.share.xml');
+ajax.loadXML('/website/static/src/xml/website.share.xml', qweb);
 
 var SocialShare = Widget.extend({
     template: 'website.social_hover',
@@ -57,7 +59,7 @@ var SocialShare = Widget.extend({
             }, 200);
         });
     },
-    renderSocial: function(social) {
+    renderSocial: function (social) {
         var url = document.URL.split(/[?#]/)[0];  // get current url without query string
         var title = document.title.split(" | ")[0];  // get the page title without the company name
         var hashtags = ' #'+ document.title.split(" | ")[1].replace(' ','') + ' ' + this.hashtags;  // company name without spaces (for hashtag)
@@ -74,8 +76,8 @@ var SocialShare = Widget.extend({
 });
 
 // Initialize all social_share links when ready
-website.ready().done(function() {
-    $('.oe_social_share').mouseenter(function() {
+base.ready().done(function () {
+    $('.oe_social_share').mouseenter(function () {
         new SocialShare($(this));
     });
 });

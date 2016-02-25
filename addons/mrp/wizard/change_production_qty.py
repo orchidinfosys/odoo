@@ -1,23 +1,5 @@
 # -*- coding: utf-8 -*-
-##############################################################################
-#
-#    OpenERP, Open Source Management Solution
-#    Copyright (C) 2004-2010 Tiny SPRL (<http://tiny.be>).
-#
-#    This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU Affero General Public License as
-#    published by the Free Software Foundation, either version 3 of the
-#    License, or (at your option) any later version.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU Affero General Public License for more details.
-#
-#    You should have received a copy of the GNU Affero General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#
-##############################################################################
+# Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 from openerp.osv import fields, osv
 from openerp.tools.translate import _
@@ -70,6 +52,7 @@ class change_production_qty(osv.osv_memory):
         prod_obj = self.pool.get('mrp.production')
         bom_obj = self.pool.get('mrp.bom')
         move_obj = self.pool.get('stock.move')
+        uom_obj = self.pool.get('product.uom')
         for wiz_qty in self.browse(cr, uid, ids, context=context):
             prod = prod_obj.browse(cr, uid, record_id, context=context)
             prod_obj.write(cr, uid, [prod.id], {'product_qty': wiz_qty.product_qty})
@@ -88,7 +71,7 @@ class change_production_qty(osv.osv_memory):
                 if not bom_id:
                     raise UserError(_("Cannot find bill of material for this product."))
 
-                factor = prod.product_qty * prod.product_uom.factor / bom_point.product_uom.factor
+                factor = uom_obj._compute_qty(cr, uid, prod.product_uom.id, prod.product_qty, bom_point.product_uom.id)
                 product_details, workcenter_details = \
                     bom_obj._bom_explode(cr, uid, bom_point, prod.product_id, factor / bom_point.product_qty, [], context=context)
                 for r in product_details:

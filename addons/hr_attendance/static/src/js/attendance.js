@@ -4,7 +4,7 @@ odoo.define('hr_attendance.hr_attendance', function(require) {
 var core = require('web.core');
 var data = require('web.data');
 var formats = require('web.formats');
-var Model = require('web.Model');
+var Model = require('web.DataModel');
 var SystrayMenu = require('web.SystrayMenu');
 var time = require('web.time');
 var Widget = require('web.Widget');
@@ -34,7 +34,7 @@ var AttendanceSlider = Widget.extend({
             title: function() {
                 var last_text = formats.format_value(self.last_sign, {type: "datetime"});
                 var current_text = formats.format_value(new Date(), {type: "datetime"});
-                var duration = self.last_sign ? $.timeago(self.last_sign) : "none";
+                var duration = self.last_sign ? moment(self.last_sign).fromNow() : "none";
                 if (self.get("signed_in")) {
                     return _.str.sprintf(_t("Last sign in: %s,<br />%s.<br />Click to sign out."), last_text, duration);
                 } else {

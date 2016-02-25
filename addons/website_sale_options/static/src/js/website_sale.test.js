@@ -26,6 +26,7 @@ Tour.register({
         {
             title:     "open customize menu",
             element:   '#customize-menu-button',
+            wait: 250
         },
         {
             title:     "click on 'Product Attribute's Filters'",
@@ -76,17 +77,18 @@ Tour.register({
         },
         {
             title:     "click on shop",
-            element:   "a:contains(Shop)",
+            element:   "a:contains(Continue Shopping)",
             waitNot:   '#products_grid_before .js_attributes',
         },
         {
             title:     "open customize menu bis",
             waitFor:   '#products_grid_before .js_attributes',
             element:   '#customize-menu-button',
+            wait: 250
         },
         {
             title:     "remove 'Product Attribute's Filters'",
-            element:   "#customize-menu a:contains(Product Attribute's Filters):has(.fa-check-square-o)",
+            element:   "#customize-menu a:contains(Product Attribute's Filters):has(input:checked)",
         },
         {
             title:     "finish",

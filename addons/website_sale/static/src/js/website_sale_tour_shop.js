@@ -3,11 +3,12 @@ odoo.define('website_sale.tour_shop', function (require) {
 
 var core = require('web.core');
 var Tour = require('web.Tour');
+var base = require('web_editor.base');
 var website = require('website.website');
 
 var _t = core._t;
 
-website.ready().done(function () {
+base.ready().done(function () {
     Tour.register({
         id: 'shop',
         name: _t("Create a product"),
@@ -18,8 +19,8 @@ website.ready().done(function () {
                 popover:   { next: _t("Start Tutorial"), end: _t("Skip It") },
             },
             {
-                element:   '#content-menu-button',
-                placement: 'left',
+                element:   '#oe_main_menu_navbar a[data-action=new_page]',
+                placement: 'bottom',
                 title:     _t("Create your first product"),
                 content:   _t("Click here to add a new product."),
                 popover:   { fixed: true },
@@ -40,7 +41,7 @@ website.ready().done(function () {
             },
             {
                 waitNot:   '.modal-dialog #editor_new_product input[type=text]:not([value!=""])',
-                element:   '.modal-dialog button.btn-primary',
+                element:   '.modal-dialog button.btn-primary.btn-continue',
                 placement: 'right',
                 title:     _t("Create Product"),
                 content:   _t("Click on <em>Continue</em> to create the product."),
@@ -52,33 +53,33 @@ website.ready().done(function () {
                 popover:   { next: _t("Continue") },
             },
             {
-                element:   '.product_price .oe_currency_value:visible',
+                element:   '.product_price .oe_currency_value:visible:first',
                 sampleText: '20.50',
-                placement: 'left',
+                placement: 'bottom',
                 title:     _t("Change the price"),
                 content:   _t("Edit the price of this product by clicking on the amount."),
             },
             {
-                waitNot:   '.product_price .oe_currency_value:visible:containsExact(1.00)',
+                waitNot:   '.product_price .oe_currency_value:visible:first:containsExact(1.00)',
                 element:   '#wrap img.product_detail_img',
                 placement: 'top',
                 title:     _t("Update image"),
                 content:   _t("Click here to set an image describing your product."),
             },
             {
-                element:   '.modal .existing-attachment-cell:nth(2) img',
+                element:   '.modal .o_existing_attachment_cell:nth(2) img',
                 placement: 'top',
                 title:     _t("Choose an image"),
                 content:   _t("Choose an image from the library."),
                 popover:   { fixed: true },
                 onload: function () {
-                    $('form[action="/website/attach"] .well > *').hide();
+                    $('form[action="/web_editor/attachment/add"] .well > *').hide();
                 }
             },
             {
                 element:   '.modal .btn.save',
                 placement: 'right',
-                waitFor:   '.existing-attachment-cell.media_selected',
+                waitFor:   '.o_existing_attachment_cell.o_selected',
                 title:       _t("Save"),
                 content:     _t("Click on <em>Save</em> to add the image to the product description."),
             },
@@ -87,18 +88,18 @@ website.ready().done(function () {
                 snippet:   '#snippet_structure .oe_snippet:eq(8)',
                 placement: 'bottom',
                 title:     _t("Drag & Drop a block"),
-                content:   _t("Drag the 'Big Picture' block and drop it in your page."),
+                content:   _t("Drag this website block and drop it in your page."),
                 popover:   { fixed: true },
             },
             {
                 element:   'button[data-action=save]',
-                placement: 'right',
+                placement: 'bottom',
                 title:     _t("Save your modifications"),
                 content:   _t("Once you click on <em>Save</em>, your product is updated."),
                 popover:   { fixed: true },
             },
             {
-                waitFor:   '#website-top-navbar:hidden',
+                waitNot:   '#web_editor-top-edit',
                 element:   '.js_publish_management button.js_publish_btn.btn-danger',
                 placement: 'top',
                 title:     _t("Publish your product"),
